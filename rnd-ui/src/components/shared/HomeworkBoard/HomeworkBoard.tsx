@@ -1,0 +1,555 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  Plus, Paperclip, CheckCircle2, Trash2, Loader2,
+  BookOpen, Clock, AlertCircle, Users, X, Calendar
+} from 'lucide-react';
+import type { HomeworkData, ClassData } from '../../../types';
+import { API_BASE } from '../../../constants';
+import { cn } from '../../../lib/utils';
+import { Button, Badge, EmptyState, LoadingSpinner, Drawer } from '../../ui';
+
+interface HomeworkBoardProps {
+  mode: 'admin' | 'teacher' | 'parent';
+  classesList?: ClassData[];
+  assignedClasses?: string[];
+  wardClassRoom?: string;
+  wardId?: string;
+  showToast: (message: string, type?: 'success' | 'error') => void;
+}
+
+const emptyForm = { subject: '', title: '', description: '', dueDate: '' };
+
+// ─── Shared field classes (same token system as all other modules) ─────────
+const labelCls = 'text-[11px] font-bold uppercase tracking-wider text-slate-400';
+const inputCls = 'h-9 px-3 border border-slate-200 rounded-md text-sm text-slate-900 bg-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-100 transition-all font-[inherit] w-full';
+
+const HomeworkBoard: React.FC<HomeworkBoardProps> = ({
+  mode, classesList = [], assignedClasses = [], wardClassRoom, wardId, showToast,
+}) => {
+  const availableRooms = mode === 'admin'
+    ? Array.from(new Set(classesList.map(c => `${c.className}-${c.section}`)))
+    : mode === 'teacher' ? assignedClasses
+    : wardClassRoom ? [wardClassRoom] : [];
+
+  const [selectedRoom, setSelectedRoom] = useState(availableRooms[0] || '');
+  const [items,        setItems]        = useState<HomeworkData[]>([]);
+  const [loading,      setLoading]      = useState(false);
+  const [showDrawer,   setShowDrawer]   = useState(false);
+  const [form,         setForm]         = useState(emptyForm);
+  const [attachments,  setAttachments]  = useState<string[]>([]);
+  const [uploadingFile,setUploadingFile]= useState(false);
+  const [saving,       setSaving]       = useState(false);
+  const [ackingId,     setAckingId]     = useState<string | null>(null);
+  const [deletingId,   setDeletingId]   = useState<string | null>(null);
+
+  // Date Filtering State
+  const [filterType, setFilterType] = useState<'all' | 'today' | 'tomorrow' | 'custom'>('all');
+  const [filterDate, setFilterDate] = useState<string>('');
+
+  // Expandable Acknowledgements list for teachers/admins
+  const [expandedAcks, setExpandedAcks] = useState<Record<string, boolean>>({});
+
+  const toLocalYMD = (dateVal: string | Date) => {
+    const d = new Date(dateVal);
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${d.getFullYear()}-${month}-${day}`;
+  };
+
+  const filteredItems = useMemo(() => {
+    return items.filter(item => {
+      const itemLocalYMD = toLocalYMD(item.dueDate);
+      if (filterType === 'today') {
+        return itemLocalYMD === toLocalYMD(new Date());
+      }
+      if (filterType === 'tomorrow') {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        return itemLocalYMD === toLocalYMD(tomorrow);
+      }
+      if (filterType === 'custom' && filterDate) {
+        return itemLocalYMD === filterDate;
+      }
+      return true;
+    });
+  }, [items, filterType, filterDate]);
+
+  useEffect(() => {
+    if (!selectedRoom && availableRooms.length > 0) setSelectedRoom(availableRooms[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availableRooms.join(',')]);
+
+  const loadHomework = async () => {
+    if (!selectedRoom) { setItems([]); return; }
+    setLoading(true);
+    try {
+      const res  = await fetch(`${API_BASE}/homework/class/${encodeURIComponent(selectedRoom)}`);
+      const data = await res.json();
+      if (data.success) setItems(data.data);
+    } catch { showToast('Failed to load homework.', 'error'); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { loadHomework(); }, [selectedRoom]);
+
+  const handleFileAttach = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    if (!files.length) return;
+    setUploadingFile(true);
+    Promise.all(files.map(file => new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = async () => {
+        try {
+          const res  = await fetch(`${API_BASE}/events/media/upload`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileName: file.name, mediaBase64: reader.result }) });
+          const data = await res.json();
+          if (data.success) resolve(data.url); else reject();
+        } catch { reject(); }
+      };
+      reader.onerror = () => reject();
+    })))
+      .then(urls => setAttachments(prev => [...prev, ...urls]))
+      .catch(() => showToast('Some attachments failed to upload.', 'error'))
+      .finally(() => { setUploadingFile(false); e.target.value = ''; });
+  };
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedRoom) { showToast('Select a class room first.', 'error'); return; }
+    if (!form.subject.trim() || !form.title.trim() || !form.dueDate) { showToast('Subject, title, and due date are required.', 'error'); return; }
+    setSaving(true);
+    try {
+      const res  = await fetch(`${API_BASE}/homework`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ classRoom: selectedRoom, subject: form.subject.trim(), title: form.title.trim(), description: form.description.trim(), dueDate: form.dueDate, attachments }) });
+      const data = await res.json();
+      if (data.success) { showToast('Homework posted.'); setForm(emptyForm); setAttachments([]); setShowDrawer(false); loadHomework(); }
+      else showToast(data.message || 'Failed.', 'error');
+    } catch { showToast('Server connection failed.', 'error'); }
+    finally { setSaving(false); }
+  };
+
+  const handleAcknowledge = async (homeworkId: string) => {
+    if (!wardId) return;
+    setAckingId(homeworkId);
+    try {
+      const res  = await fetch(`${API_BASE}/homework/${homeworkId}/ack`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ studentId: wardId }) });
+      const data = await res.json();
+      if (data.success) { showToast('Marked as acknowledged.'); loadHomework(); }
+      else showToast(data.message || 'Failed.', 'error');
+    } catch { showToast('Server connection failed.', 'error'); }
+    finally { setAckingId(null); }
+  };
+
+  const handleDelete = async (homeworkId: string, title: string) => {
+    if (!window.confirm(`Delete "${title}"? This cannot be undone.`)) return;
+    setDeletingId(homeworkId);
+    try {
+      const res  = await fetch(`${API_BASE}/homework/${homeworkId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) { showToast('Homework deleted.'); setItems(prev => prev.filter(i => i._id !== homeworkId)); }
+      else showToast(data.message || 'Failed.', 'error');
+    } catch { showToast('Server connection failed.', 'error'); }
+    finally { setDeletingId(null); }
+  };
+
+  const canManage = mode === 'admin' || mode === 'teacher';
+
+  // ─── KPI computations ─────────────────────────────────────────────────────
+  const today = new Date().toDateString();
+  const kpi = useMemo(() => ({
+    total:    items.length,
+    dueToday: items.filter(i => new Date(i.dueDate).toDateString() === today).length,
+    overdue:  items.filter(i => new Date(i.dueDate) < new Date(today)).length,
+    acked:    items.reduce((acc, i) => acc + i.acknowledgements.length, 0),
+  }), [items, today]);
+
+  // ─── Subject Badge Color Helper ───────────────────────────────────────────
+  const getSubjectBadgeVariant = (subject: string): 'purple' | 'blue' | 'emerald' | 'amber' | 'indigo' | 'rose' => {
+    const s = subject.toLowerCase();
+    if (s.includes('math')) return 'indigo';
+    if (s.includes('sci') || s.includes('phy') || s.includes('chem') || s.includes('bio')) return 'emerald';
+    if (s.includes('eng') || s.includes('lit')) return 'purple';
+    if (s.includes('hist') || s.includes('geo') || s.includes('soc')) return 'amber';
+    if (s.includes('comp') || s.includes('tech') || s.includes('coding')) return 'blue';
+    return 'rose';
+  };
+
+  // ─── Due-date helper ───────────────────────────────────────────────────────
+  const getDueMeta = (dueDate: string) => {
+    const d = new Date(dueDate);
+    const todayDate = new Date(today);
+    const isOverdue  = d < todayDate;
+    const isDueToday = d.toDateString() === today;
+    const formattedDate = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+    const label = isOverdue ? `Overdue (${formattedDate})` : isDueToday ? 'Due Today' : `Due: ${formattedDate}`;
+    const cls   = isOverdue 
+      ? 'text-rose-700 bg-rose-50 border-rose-200/90 shadow-2xs' 
+      : isDueToday 
+      ? 'text-amber-800 bg-amber-50 border-amber-200/90 shadow-2xs' 
+      : 'text-indigo-700 bg-indigo-50 border-indigo-200/90 shadow-2xs';
+    return { isOverdue, isDueToday, label, cls };
+  };
+
+  // ─── RENDER ────────────────────────────────────────────────────────────────
+  return (
+    <div className="flex flex-col gap-5 font-sans text-slate-900">
+
+      {/* Page header — title + class switcher + primary action all in one line */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-4">
+          <div>
+            <h1 className="text-[22px] font-extrabold text-slate-900 tracking-tight">Homework Board</h1>
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              {/* Class room selector is a compact inline control in the header */}
+              {availableRooms.length > 1 && (
+                <select
+                  className="h-8 pl-3 pr-7 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 bg-white outline-none focus:border-blue-500 transition-colors appearance-none cursor-pointer shadow-2xs"
+                  value={selectedRoom} onChange={e => setSelectedRoom(e.target.value)}>
+                  {availableRooms.map(room => <option key={room} value={room}>{room}</option>)}
+                </select>
+              )}
+              {availableRooms.length === 1 && (
+                <span className="text-xs font-bold text-slate-600 bg-slate-100/90 px-2.5 py-1 rounded-md border border-slate-200/70">{selectedRoom}</span>
+              )}
+              {availableRooms.length === 0 && (
+                <span className="text-xs font-bold text-red-500">No class room assigned</span>
+              )}
+              {selectedRoom && (
+                <span className="text-xs text-slate-400 font-medium">{items.length} assignment{items.length !== 1 ? 's' : ''}</span>
+              )}
+            </div>
+          </div>
+        </div>
+        {canManage && (
+          <Button onClick={() => { setForm(emptyForm); setAttachments([]); setShowDrawer(true); }}>
+            <Plus size={14} /> Post Homework
+          </Button>
+        )}
+      </div>
+
+      {/* Modern KPI Stat Cards — admin/teacher only */}
+      {canManage && (
+        <div className="grid grid-cols-4 gap-3.5 max-[700px]:grid-cols-2">
+          {[
+            { label: 'Total Assignments', value: kpi.total,    icon: <BookOpen size={16} />,    color: 'text-indigo-700', bg: 'bg-indigo-50 border-indigo-100' },
+            { label: 'Due Today',         value: kpi.dueToday, icon: <Clock size={16} />,       color: 'text-amber-800',  bg: 'bg-amber-50 border-amber-100' },
+            { label: 'Overdue',           value: kpi.overdue,  icon: <AlertCircle size={16} />, color: 'text-rose-700',   bg: 'bg-rose-50 border-rose-100' },
+            { label: 'Acknowledged',      value: kpi.acked,    icon: <Users size={16} />,       color: 'text-emerald-800',bg: 'bg-emerald-50 border-emerald-100' },
+          ].map(stat => (
+            <div key={stat.label} className="flex items-center gap-3 p-3.5 rounded-xl border border-slate-200/80 bg-white shadow-2xs hover:shadow-xs transition-all">
+              <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 border ${stat.bg} ${stat.color}`}>
+                {stat.icon}
+              </div>
+              <div>
+                <div className={`text-xl font-extrabold leading-none ${stat.color}`}>{stat.value}</div>
+                <div className="text-xs font-medium text-slate-400 mt-1">{stat.label}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Date Filter Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-slate-50/80 border border-slate-200/80 rounded-xl shadow-2xs">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-bold text-slate-600 mr-1 flex items-center gap-1.5">
+            <Calendar size={13} className="text-slate-400" /> Filter by Due Date:
+          </span>
+          {[
+            { type: 'all' as const, label: 'All Dates' },
+            { type: 'today' as const, label: 'Today' },
+            { type: 'tomorrow' as const, label: 'Tomorrow' },
+          ].map(opt => (
+            <button
+              key={opt.type}
+              type="button"
+              onClick={() => { setFilterType(opt.type); setFilterDate(''); }}
+              className={cn(
+                'px-3 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer',
+                filterType === opt.type
+                  ? 'bg-blue text-white border-blue shadow-xs'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100/70 hover:text-slate-900'
+              )}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        
+        {/* Custom date picker */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-400 font-medium">Or pick date:</span>
+          <input
+            type="date"
+            value={filterDate}
+            onChange={e => {
+              setFilterDate(e.target.value);
+              if (e.target.value) {
+                setFilterType('custom');
+              } else {
+                setFilterType('all');
+              }
+            }}
+            className="h-8 px-2.5 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 bg-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-100 transition-all cursor-pointer"
+          />
+        </div>
+      </div>
+
+      {/* Homework list */}
+      {loading ? (
+        <div className="py-12 flex justify-center"><LoadingSpinner /></div>
+      ) : items.length === 0 ? (
+        <EmptyState
+          icon={<BookOpen size={36} />}
+          title="No homework posted yet."
+          subtitle={canManage ? "Click 'Post Homework' to create the first assignment." : "No homework has been posted for this class."}
+          className="bg-white border border-slate-200 rounded-xl py-14 shadow-2xs"
+        />
+      ) : filteredItems.length === 0 ? (
+        <EmptyState
+          icon={<BookOpen size={36} />}
+          title="No homework found for this filter."
+          subtitle="Try selecting a different date or choose 'All Dates' above."
+          className="bg-white border border-slate-200 rounded-xl py-14 shadow-2xs"
+        />
+      ) : (
+        <div className="flex flex-col gap-3.5">
+          {filteredItems.map(item => {
+            const { isOverdue, isDueToday, label: dueLabel, cls: dueCls } = getDueMeta(item.dueDate);
+            const alreadyAcked = wardId ? item.acknowledgements.some(a => a.student === wardId) : false;
+
+            return (
+              <div
+                key={item._id}
+                className="bg-white border border-slate-200/90 rounded-xl shadow-2xs hover:shadow-md hover:border-slate-300 transition-all duration-200 overflow-hidden relative flex flex-col justify-between group"
+              >
+                {/* Left accent bar */}
+                <div
+                  className={cn(
+                    'absolute left-0 top-0 bottom-0 w-1.5 transition-colors',
+                    isOverdue  ? 'bg-gradient-to-b from-rose-500 to-red-600'   :
+                    isDueToday ? 'bg-gradient-to-b from-amber-400 to-orange-500' :
+                                 'bg-gradient-to-b from-indigo-500 to-blue-600'
+                  )}
+                />
+
+                {/* Card body */}
+                <div className="pl-6 pr-5 pt-4 pb-3 flex flex-col gap-2.5">
+                  {/* Row 1: Subject badge + title + due date chip */}
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1 flex-wrap">
+                      <Badge variant={getSubjectBadgeVariant(item.subject)} size="sm" className="font-bold uppercase tracking-wider px-2.5 py-0.5">
+                        {item.subject}
+                      </Badge>
+                      <h3 className="text-base font-bold text-slate-900 group-hover:text-indigo-600 transition-colors tracking-tight m-0 min-w-0 truncate">
+                        {item.title}
+                      </h3>
+                    </div>
+                    <div className={cn('flex-shrink-0 flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-full border', dueCls)}>
+                      {isOverdue ? <AlertCircle size={13} className="text-rose-600" /> : isDueToday ? <Clock size={13} className="text-amber-600" /> : <Calendar size={13} className="text-indigo-600" />}
+                      <span>{dueLabel}</span>
+                    </div>
+                  </div>
+
+                  {/* Row 2: Description callout box */}
+                  {item.description && (
+                    <div className="mt-1 p-3 rounded-lg bg-slate-50/90 border border-slate-100 text-xs text-slate-700 leading-relaxed font-normal">
+                      {item.description}
+                    </div>
+                  )}
+
+                  {/* Row 3: Attachments */}
+                  {item.attachments?.length > 0 && (
+                    <div className="flex gap-2 flex-wrap mt-1">
+                      {item.attachments.map((url, i) => (
+                        <a
+                          key={i}
+                          href={url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50/80 hover:bg-indigo-100 border border-indigo-100 text-indigo-700 text-xs font-semibold transition-all no-underline shadow-2xs"
+                        >
+                          <Paperclip size={12} className="text-indigo-500" />
+                          <span>Attachment {i + 1}</span>
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Card footer */}
+                <div className="pl-6 pr-5 py-2.5 bg-slate-50/70 border-t border-slate-100 flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-3 text-xs text-slate-500 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 font-bold text-[10px] flex items-center justify-center uppercase">
+                        {item.createdByName ? item.createdByName.charAt(0) : 'U'}
+                      </div>
+                      <span className="text-slate-600 font-medium">
+                        By <strong className="text-slate-800 font-bold">{item.createdByName}</strong>
+                      </span>
+                      <span className="px-2 py-0.5 text-[10px] font-bold tracking-wide uppercase rounded-full bg-slate-200/70 text-slate-600">
+                        {item.createdBy ? 'Teacher' : 'Admin'}
+                      </span>
+                    </div>
+
+                    {canManage && (
+                      <>
+                        <span className="text-slate-300">·</span>
+                        <button
+                          type="button"
+                          onClick={() => setExpandedAcks(prev => ({ ...prev, [item._id]: !prev[item._id] }))}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/70 text-emerald-800 text-xs font-bold transition-all cursor-pointer"
+                        >
+                          <CheckCircle2 size={13} className="text-emerald-600" />
+                          <span>{item.acknowledgements.length} Acknowledged</span>
+                          <span className="text-[10px] font-normal text-emerald-700/80">
+                            ({expandedAcks[item._id] ? 'Hide' : 'View'})
+                          </span>
+                        </button>
+                      </>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {/* Parent: acknowledge action */}
+                    {mode === 'parent' && wardId && (
+                      alreadyAcked ? (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-50 text-emerald-700 font-bold text-xs border border-emerald-200">
+                          <CheckCircle2 size={13} /> Acknowledged
+                        </span>
+                      ) : (
+                        <Button size="sm" variant="secondary" disabled={ackingId === item._id} onClick={() => handleAcknowledge(item._id)}>
+                          {ackingId === item._id ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+                          Acknowledge
+                        </Button>
+                      )
+                    )}
+
+                    {/* Admin / teacher: delete */}
+                    {canManage && (
+                      <button
+                        className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-slate-200/60 hover:border-rose-200 transition-all cursor-pointer"
+                        title="Delete homework"
+                        disabled={deletingId === item._id}
+                        onClick={() => handleDelete(item._id, item.title)}
+                      >
+                        {deletingId === item._id ? <Loader2 size={13} className="animate-spin text-rose-500" /> : <Trash2 size={14} />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Expanded Acknowledged Student List */}
+                {canManage && expandedAcks[item._id] && (
+                  <div className="pl-6 pr-5 py-3.5 bg-emerald-50/40 border-t border-slate-100/90 transition-all">
+                    <div className="text-[11px] font-bold text-emerald-900 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                      <Users size={12} className="text-emerald-600" />
+                      Acknowledged By ({item.acknowledgements.length} Student{item.acknowledgements.length !== 1 ? 's' : ''}):
+                    </div>
+                    {item.acknowledgements.length === 0 ? (
+                      <div className="text-xs text-slate-500 italic">No students have acknowledged this assignment yet.</div>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {item.acknowledgements.map((ack, idx) => (
+                          <div
+                            key={idx}
+                            className="inline-flex items-center gap-1.5 bg-white border border-emerald-200/80 rounded-lg px-2.5 py-1 text-xs text-emerald-900 font-semibold shadow-2xs"
+                          >
+                            <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                            <span>{ack.studentName}</span>
+                            <span className="text-[10px] text-slate-400 font-normal ml-0.5">
+                              ({new Date(ack.at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })})
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ─── Post Homework Drawer ─────────────────────────────────────────────── */}
+      <Drawer
+        isOpen={showDrawer}
+        onClose={() => setShowDrawer(false)}
+        title="Post Homework"
+        subtitle={selectedRoom ? `Posting to ${selectedRoom}` : undefined}
+        footer={
+          <div className="flex gap-2">
+            <Button type="submit" form="hw-form" disabled={saving} className="flex-1 justify-center">
+              {saving ? <><Loader2 size={12} className="animate-spin mr-1" />Posting…</> : 'Post Homework'}
+            </Button>
+            <button type="button" onClick={() => setShowDrawer(false)}
+              className="flex items-center gap-1 px-4 h-9 rounded-md border border-slate-200 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors">
+              <X size={13} /> Cancel
+            </button>
+          </div>
+        }
+      >
+        <form id="hw-form" onSubmit={handleCreate} className="flex flex-col gap-5">
+
+          {/* Subject + Due Date — 2 columns */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="flex flex-col gap-1.5">
+              <label className={labelCls}>Subject <span className="text-red-400 normal-case font-normal">*</span></label>
+              <input type="text" className={inputCls} placeholder="e.g. Mathematics" required
+                value={form.subject} onChange={e => setForm(f => ({ ...f, subject: e.target.value }))} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className={labelCls}>Due Date <span className="text-red-400 normal-case font-normal">*</span></label>
+              <input type="date" className={inputCls} required
+                value={form.dueDate} onChange={e => setForm(f => ({ ...f, dueDate: e.target.value }))} />
+            </div>
+          </div>
+
+          {/* Title — full width */}
+          <div className="flex flex-col gap-1.5">
+            <label className={labelCls}>Title <span className="text-red-400 normal-case font-normal">*</span></label>
+            <input type="text" className={inputCls} placeholder="e.g. Chapter 5 Practice Problems" required
+              value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
+          </div>
+
+          {/* Description */}
+          <div className="flex flex-col gap-1.5">
+            <label className={labelCls}>Description <span className="text-slate-300 normal-case font-normal">optional</span></label>
+            <textarea
+              className="px-3 py-2.5 border border-slate-200 rounded-md text-sm text-slate-900 bg-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-100 transition-all font-[inherit] resize-none w-full"
+              rows={3} placeholder="Explain the assignment, pages to refer, etc…"
+              value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+          </div>
+
+          {/* Attachments */}
+          <div className="flex flex-col gap-1.5">
+            <label className={labelCls}>Attachments <span className="text-slate-300 normal-case font-normal">optional</span></label>
+            <div className={cn(
+              'flex items-center justify-between p-3 border border-dashed rounded-lg transition-colors',
+              uploadingFile ? 'border-blue-300 bg-blue-50' : 'border-slate-300 bg-slate-50 hover:border-slate-400'
+            )}>
+              <div className="flex items-center gap-2">
+                <Paperclip size={13} className="text-slate-400" />
+                {uploadingFile ? (
+                  <span className="text-xs font-semibold text-blue-600 flex items-center gap-1"><Loader2 size={11} className="animate-spin" /> Uploading…</span>
+                ) : attachments.length > 0 ? (
+                  <span className="text-xs font-bold text-emerald-700">{attachments.length} file(s) ready</span>
+                ) : (
+                  <span className="text-xs text-slate-400">No files attached</span>
+                )}
+              </div>
+              <label className="flex items-center gap-1 text-xs font-bold text-blue-600 cursor-pointer hover:text-blue-800 transition-colors">
+                <span>Choose Files</span>
+                <input type="file" multiple className="hidden" onChange={handleFileAttach} />
+              </label>
+            </div>
+          </div>
+
+        </form>
+      </Drawer>
+
+    </div>
+  );
+};
+
+export default HomeworkBoard;

@@ -1,0 +1,738 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+
+/* Tailwind CSS v3 directives */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+:root {
+  font-family: 'Outfit', sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  /* Light mode defaults */
+  --color-bg: #f1f5f9;
+  --color-surface: #ffffff;
+  --color-border: #f1f5f9;
+  --color-text: #1e293b;
+  --color-text-muted: #64748b;
+
+  color: var(--color-text);
+  background-color: var(--color-bg);
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Dark mode CSS variables — toggled by .dark class on <html> */
+.dark {
+  --color-bg: #0f172a;
+  --color-surface: #1e293b;
+  --color-border: #334155;
+  --color-text: #f1f5f9;
+  --color-text-muted: #94a3b8;
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background-color: var(--color-bg);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* ── Global custom scrollbar ─────────────────────────────────────────────── */
+* {
+  scrollbar-width: thin;                 /* Firefox — thin track */
+  scrollbar-color: #e2e8f0 transparent;  /* Firefox — thumb / track */
+}
+
+/* Webkit (Chrome, Edge, Safari) */
+*::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: #e2e8f0;
+  border-radius: 99px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: #cbd5e1;
+}
+
+/* Sidebar gets an even lighter thumb so it blends into white */
+.sidebar::-webkit-scrollbar-thumb {
+  background-color: #f1f5f9;
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover {
+  background-color: #e2e8f0;
+}
+
+/* Core Dashboard Layout */
+.dashboard-container {
+  display: flex;
+  height: 100vh;
+  height: 100dvh;
+  width: 100vw;
+  background-color: #f8fafc;
+  overflow: hidden;
+}
+
+/* Sidebar Styles */
+.sidebar {
+  width: 250px;
+  height: 100vh;
+  height: 100dvh;
+  background-color: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  padding: 18px 10px 14px;
+  flex-shrink: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+  transition: width 0.18s cubic-bezier(0.4, 0, 0.2, 1), padding 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar.collapsed {
+  width: 68px;
+  padding: 18px 6px 14px;
+}
+
+/* Main Area Layout */
+.main-layout {
+  flex-grow: 1;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Top Header — mobile-first: compact/wrappable on phones, fixed 70px row on tablet+ */
+.top-header {
+  min-height: 60px;
+  background-color: #ffffff;
+  border-bottom: 1px solid #f1f5f9;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+@media (min-width: 768px) {
+  .top-header {
+    height: 70px;
+    padding: 0 24px;
+    flex-wrap: nowrap;
+  }
+}
+
+@media (min-width: 1024px) {
+  .top-header {
+    padding: 0 32px;
+  }
+}
+
+.search-bar-container {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 160px;
+}
+
+@media (min-width: 768px) {
+  .search-bar-container {
+    flex: 0 1 320px;
+    max-width: 320px;
+  }
+}
+
+.search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #94a3b8;
+  width: 18px;
+  height: 18px;
+}
+
+.search-input {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px 8px 38px;
+  border: 1px solid #e2e8f0;
+  border-radius: 9999px;
+  background-color: #f8fafc;
+  font-size: 14px;
+  font-family: 'Outfit', sans-serif;
+  color: #1e293b;
+  color-scheme: light;
+  outline: none;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+}
+
+.search-input:focus {
+  border-color: #cbd5e1;
+  background-color: #ffffff;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+@media (min-width: 768px) {
+  .header-right { gap: 20px; }
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+@media (min-width: 768px) {
+  .header-actions { gap: 12px; }
+}
+
+/* Icon buttons sized to the 44px minimum touch target on every device */
+.action-icon-btn {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 50%;
+  border: 1px solid #e2e8f0;
+  background-color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.action-icon-btn:hover {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+.user-profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.user-avatar,
+.user-avatar-initials {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.user-info {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Below ~480px, keep just the avatar — name/role text hides to avoid crowding */
+@media (max-width: 479px) {
+  .user-info { display: none; }
+}
+
+.user-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.user-role {
+  font-size: 11px;
+  font-weight: 500;
+  color: #64748b;
+}
+
+/* Dashboard Content Grid — flexbox sizing so it never depends on a hard-coded header height */
+.content-area {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  background-color: #fafbfc;
+}
+
+.dashboard-main-view {
+  flex-grow: 1;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+@media (min-width: 768px) {
+  .dashboard-main-view {
+    padding: 24px 28px;
+    gap: 20px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .dashboard-main-view {
+    padding: 28px 32px;
+    gap: 24px;
+  }
+}
+
+/* Student List Table & Dashboard Grid Views */
+.responsive-table-container {
+  overflow-x: auto;
+}
+
+.student-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.student-table th {
+  padding: 12px 16px;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 12px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+}
+
+.student-table td {
+  padding: 14px 16px;
+  border-bottom: 1px solid #f8fafc;
+  font-size: 14px;
+  color: #334155;
+  font-weight: 500;
+}
+
+.student-table tr:hover td {
+  background-color: #fafbfc;
+}
+
+.fee-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 6px;
+  display: inline-block;
+}
+
+.fee-badge.paid {
+  background-color: #dcfce7;
+  color: #166534;
+}
+
+.fee-badge.pending {
+  background-color: #fef9c3;
+  color: #854d0e;
+}
+
+.action-btn {
+  background-color: #4f46e5;
+  color: #ffffff;
+  border: none;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.action-btn:hover {
+  background-color: #4338ca;
+}
+
+.action-btn.secondary {
+  background-color: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+}
+
+.action-btn.secondary:hover {
+  background-color: #e2e8f0;
+}
+
+.form-group {
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.form-input {
+  padding: 10px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: 'Outfit', sans-serif;
+  outline: none;
+  background-color: #ffffff;
+  color: #1e293b;
+  color-scheme: light;
+}
+
+.form-input:focus {
+  border-color: #6366f1;
+}
+
+/* Toast Message */
+.toast-notification {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background-color: #0f172a;
+  color: #ffffff;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 50;
+  transform: translateY(0);
+  transition: all 0.3s ease;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 40px;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+/* IIT Jammu Inspired Login Styles */
+.login-page-container {
+  display: flex;
+  min-height: 100vh;
+  width: 100vw;
+  align-items: center;
+  justify-content: center;
+  background-color: #cbd5e1; /* Simple clean slate-gray background, no image */
+}
+
+.login-card {
+  background-color: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #cbd5e1;
+  padding: 24px 32px;
+  width: 100%;
+  max-width: 340px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.login-logo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.login-logo-icon {
+  width: 38px;
+  height: 38px;
+  color: #2563eb;
+}
+
+.login-title {
+  font-size: 21px;
+  font-weight: 700;
+  color: #1e3a8a;
+  letter-spacing: 0.5px;
+}
+
+.login-divider {
+  width: 100%;
+  height: 1px;
+  background-color: #f1f5f9;
+  margin: 2px 0;
+}
+
+.login-welcome-banner {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 2px;
+}
+
+.login-welcome-hn {
+  font-size: 14px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.login-welcome-en {
+  font-size: 13px;
+  font-weight: 500;
+  color: #475569;
+}
+
+.login-iit-btn {
+  width: 100%;
+  background-color: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+  transition: all 0.2s ease;
+}
+
+.login-iit-btn:hover {
+  border-color: #2563eb;
+  box-shadow: 0 6px 12px -3px rgba(37, 99, 235, 0.12);
+  transform: translateY(-1.5px);
+}
+
+.login-iit-btn-hn {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.login-iit-btn-en {
+  font-size: 13px;
+  font-weight: 700;
+  color: #2563eb;
+}
+
+/* ── Dark Mode Theme Overrides ────────────────────────────────────────── */
+/* CSS-class-based components still using old selectors */
+
+.dark body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+}
+
+.dark .dashboard-container {
+  background-color: #0f172a;
+}
+
+.dark .sidebar {
+  background-color: #1e293b;
+  border-right-color: #334155;
+}
+
+.dark .top-header {
+  background-color: #1e293b;
+  border-bottom-color: #334155;
+}
+
+.dark .search-input {
+  background-color: #0f172a;
+  border-color: #334155;
+  color: #f8fafc;
+  color-scheme: dark;
+}
+
+.dark .search-input:focus {
+  background-color: #1e293b;
+  border-color: #475569;
+}
+
+.dark .action-icon-btn {
+  background-color: #334155;
+  border-color: #475569;
+  color: #cbd5e1;
+}
+
+.dark .action-icon-btn:hover {
+  background-color: #475569;
+  color: #ffffff;
+}
+
+.dark .user-name { color: #f8fafc; }
+.dark .user-role { color: #cbd5e1; }
+.dark .logo-text { color: #f8fafc; }
+
+/* Legacy raw-CSS modal (AdminPortal delete/promote/message dialogs, fee collection flow,
+   AdminMessages). These class names got orphaned mid-way through the Tailwind migration —
+   the components still render them, but nothing styled them, so they rendered unpositioned
+   and got shoved wherever normal document flow happened to put them instead of centered
+   as an overlay. Restoring real styles here (rather than rewriting every call site) fixes
+   all of them at once. */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background-color: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.modal-content {
+  background-color: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  padding: 24px;
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.modal-title {
+  font-size: 18px;
+  font-weight: 800;
+  color: #1e293b;
+  margin: 0 0 8px 0;
+}
+
+.modal-desc {
+  font-size: 14px;
+  color: #64748b;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.dark .modal-content {
+  background-color: #1e293b;
+  border-color: #334155;
+  color: #f8fafc;
+}
+
+.dark .modal-overlay {
+  background-color: rgba(0, 0, 0, 0.75);
+}
+
+.dark .modal-title {
+  color: #f8fafc;
+}
+
+.dark h1, .dark h2, .dark h3, .dark h4, .dark h5, .dark h6 { color: #f8fafc; }
+
+.dark p, .dark label, .dark .form-label, .dark .text-muted {
+  color: #cbd5e1;
+}
+
+.dark .student-table,
+.dark table {
+  background-color: #1e293b;
+  color: #f8fafc;
+  border-color: #334155;
+}
+
+.dark th {
+  background-color: #0f172a;
+  color: #cbd5e1;
+  border-bottom-color: #334155;
+}
+
+.dark td {
+  border-bottom-color: #334155;
+  color: #f8fafc;
+}
+
+.dark tr:hover td {
+  background-color: #253347;
+}
+
+.dark input:not([type="checkbox"]):not([type="radio"]),
+.dark select,
+.dark textarea,
+.dark .form-input {
+  background-color: #0f172a;
+  border-color: #334155;
+  color: #f8fafc;
+  color-scheme: dark;
+}
+
+.dark input:focus,
+.dark select:focus,
+.dark textarea:focus,
+.dark .form-input:focus {
+  border-color: #3b82f6;
+  background-color: #1e293b;
+}
+
+.dark hr { border-top-color: #334155; }
+
+.dark .empty-state { color: #94a3b8; }
+
+.dark .content-area {
+  background-color: #0f172a;
+}
+
+.dark .toggle-sidebar-btn {
+  background-color: #1e293b;
+  border-color: #334155;
+}
+
+.dark .toggle-sidebar-btn svg { color: #cbd5e1; }
+
+/* ── Scrollbars in dark mode ─────────────────────────────────── */
+.dark * {
+  scrollbar-color: #475569 transparent;
+}
+
+.dark *::-webkit-scrollbar-thumb {
+  background-color: #475569;
+}
+
+.dark *::-webkit-scrollbar-thumb:hover {
+  background-color: #64748b;
+}
+
+/* ── Tailwind dark: utilities — ensure they win over CSS class rules ─────── */
+/* (Tailwind generates these automatically now that darkMode: 'class' is set)  */

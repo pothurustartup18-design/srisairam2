@@ -1,0 +1,45 @@
+/* ─── Toast.css ──────────────────────────────────────────────────────────────
+   Notification toast that slides in from the bottom-right corner.
+   Used by: Admin and Teacher portals.
+──────────────────────────────────────────────────────────────────────────── */
+
+.toast-notification {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  left: 16px;
+  margin-left: auto;
+  background-color: #0f172a;
+  color: #ffffff;
+  padding: 12px 20px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 9999;
+  animation: toast-slide-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  width: max-content;
+  max-width: min(380px, calc(100vw - 32px));
+}
+
+@media (max-width: 479px) {
+  .toast-notification {
+    bottom: 16px;
+    right: 16px;
+    left: 16px;
+  }
+}
+
+@keyframes toast-slide-in {
+  from {
+    transform: translateY(30px) scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}

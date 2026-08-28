@@ -1,0 +1,4 @@
+# Keeps the certs folder in git tracking.
+# When deploying to production, place your Let's Encrypt certificates here:
+# - fullchain.pem
+# - privkey.pem

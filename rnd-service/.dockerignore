@@ -1,0 +1,11 @@
+node_modules
+npm-debug.log
+dist
+.env
+.git
+.gitignore
+.vscode
+redis_win
+redis.zip
+*.bat
+*.md

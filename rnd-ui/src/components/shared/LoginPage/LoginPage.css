@@ -1,0 +1,146 @@
+/* ─── LoginPage.css ──────────────────────────────────────────────────────────
+   Full-page login screen with role selection and credential form.
+   Covers: page background, card, logo, buttons, divider, welcome banner, glows.
+──────────────────────────────────────────────────────────────────────────── */
+
+/* ── Page wrapper ─────────────────────────────────────────────────────────── */
+.login-page-container {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #e0e7ff 0%, #f8fafc 50%, #fdf4ff 100%);
+  padding: clamp(16px, 5vw, 48px) 16px;
+  width: 100%;
+  box-sizing: border-box;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Decorative background glows */
+.auth-glow-top {
+  position: absolute;
+  top: -10%;
+  left: -10%;
+  width: min(400px, 80vw);
+  height: min(400px, 80vw);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(99,102,241,0.15) 0%, rgba(255,255,255,0) 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.auth-glow-bottom {
+  position: absolute;
+  bottom: -10%;
+  right: -10%;
+  width: min(500px, 100vw);
+  height: min(500px, 100vw);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(168,85,247,0.12) 0%, rgba(255,255,255,0) 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Card ─────────────────────────────────────────────────────────────────── */
+.login-card {
+  background-color: #ffffff;
+  border-radius: 20px;
+  padding: clamp(24px, 6vw, 40px) clamp(16px, 5vw, 36px);
+  width: 100%;
+  box-shadow:
+    0 10px 25px -5px rgba(0, 0, 0, 0.1),
+    0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  animation: card-fade-in 0.4s ease;
+  box-sizing: border-box;
+  position: relative;
+  z-index: 10;
+}
+
+@keyframes card-fade-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Logo area ────────────────────────────────────────────────────────────── */
+.login-logo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.login-logo-icon {
+  width: 52px;
+  height: 52px;
+  color: #6366f1;
+  filter: drop-shadow(0 4px 8px rgba(99, 102, 241, 0.25));
+}
+
+.login-title {
+  font-size: clamp(22px, 5vw, 28px);
+  font-weight: 800;
+  color: #1e3a8a;
+  margin: 0;
+  letter-spacing: -0.5px;
+  text-align: center;
+}
+
+/* ── Divider ──────────────────────────────────────────────────────────────── */
+.login-divider {
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #e2e8f0, transparent);
+}
+
+/* ── Welcome banner ───────────────────────────────────────────────────────── */
+.login-welcome-banner {
+  text-align: center;
+  width: 100%;
+}
+
+.login-welcome-en {
+  font-size: clamp(13px, 3.5vw, 14.5px);
+  font-weight: 600;
+  color: #475569;
+  letter-spacing: 0.01em;
+}
+
+/* ── Role-select buttons ──────────────────────────────────────────────────── */
+.login-iit-btn {
+  width: 100%;
+  padding: 14px 20px;
+  border-radius: 12px;
+  border: 1.5px solid #e2e8f0;
+  background-color: #f8fafc;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.login-iit-btn:hover {
+  border-color: #6366f1;
+  background-color: #ede9fe;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.15);
+}
+
+.login-iit-btn-en {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.login-iit-btn:hover .login-iit-btn-en {
+  color: #4f46e5;
+}

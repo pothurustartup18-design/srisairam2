@@ -1,0 +1,85 @@
+/* ─── Sidebars.css — structural layout only ─────────────────────────────────
+   All visual styling (colors, hover, active states) is in Sidebars.tsx via
+   Tailwind. This file only handles the structural layout that requires
+   dynamic width for the collapsed state.
+──────────────────────────────────────────────────────────────────────────── */
+
+.sidebar {
+  width: 250px;
+  height: 100vh;
+  height: 100dvh;
+  background-color: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  padding: 18px 10px 14px;
+  flex-shrink: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+  transition: width 0.18s cubic-bezier(0.4, 0, 0.2, 1), padding 0.18s cubic-bezier(0.4, 0, 0.2, 1), transform 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar.collapsed {
+  width: 68px;
+  padding: 18px 6px 14px;
+}
+
+/* Scrollable nav area */
+.sidebar-nav {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #f1f5f9 transparent;
+}
+
+.sidebar-nav::-webkit-scrollbar { width: 3px; }
+.sidebar-nav::-webkit-scrollbar-track { background: transparent; }
+.sidebar-nav::-webkit-scrollbar-thumb { background: #f1f5f9; border-radius: 99px; }
+
+/* ─── Responsive off-canvas drawer (phone widths, <768px) ───────────────────
+   Opt-in via the `.sidebar--responsive` modifier so only portals that wire up
+   a mobile open/close state (Teacher, Parent) get this behavior — anything
+   still just using the plain `.sidebar` class keeps its original always-
+   visible desktop layout unchanged.
+──────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 767px) {
+  .sidebar--responsive {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 50;
+    width: 280px;
+    box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+    transform: translateX(-100%);
+  }
+
+  .sidebar--responsive.mobile-open {
+    transform: translateX(0);
+    box-shadow: 8px 0 24px rgba(15, 23, 42, 0.12);
+  }
+
+  /* Never show the icon-only rail inside the mobile drawer — always full labels */
+  .sidebar--responsive.collapsed {
+    width: 280px;
+    padding: 18px 10px 14px;
+  }
+}
+
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  z-index: 40;
+  animation: sidebar-backdrop-fade-in 0.15s ease;
+}
+
+@keyframes sidebar-backdrop-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (min-width: 768px) {
+  .sidebar-backdrop { display: none; }
+}
