@@ -1,5 +1,7 @@
 import { Queue } from 'bullmq';
-import { sendWhatsAppAuto, sendWhatsAppMediaDetailed } from '../services/whatsapp.service';
+import { sendWhatsAppAuto, sendWhatsAppMediaDetailed, sendWhatsAppTemplate, normalizePhone } from '../services/whatsapp.service';
+import { resolveTemplateMessage } from './whatsappTemplates';
+import redisClient from './redis';
 
 export const connectionOptions = {
   host: process.env.REDIS_HOST || '127.0.0.1',
@@ -76,6 +78,65 @@ export const queueNotification = async (jobName: 'sendWhatsAppText' | 'sendWhats
       await sendWhatsAppMediaDetailed(data.to, data.mediaUrl, data.type, data.filename, data.caption);
     }
   }
+};
+
+export type TemplateNotificationResult = { queued: boolean; reason?: string };
+
+/**
+ * Validate + enqueue a Meta template notification for PROACTIVE
+ * (business-initiated) messaging — e.g. attendance-absence alerts.
+ *
+ * Runs the SAME infrastructure as queueNotification:
+ *  - same `notificationQueue`, same NOTIFICATION_JOB_OPTIONS (3 attempts, 2-min
+ *    exponential backoff kept above WHATSAPP_DEDUPE_WINDOW_MS)
+ *  - same synchronous fallback when Redis is down
+ *  - the worker records the send through the existing WhatsAppMessage lifecycle
+ *    (queued → sending → sent → delivered → read / failed) and dedupe.
+ *
+ * Validation happens HERE (registry key known, params complete, no stray params,
+ * recipient phone valid) so a malformed template job never reaches Meta.
+ */
+export const queueTemplateNotification = async (
+  templateKey: string,
+  data: { to: string; params: Record<string, unknown>; dedupeKey?: string }
+): Promise<TemplateNotificationResult> => {
+  const resolved = resolveTemplateMessage(templateKey, data.params || {});
+  if (!resolved.ok) {
+    console.error(`[Queue] Template notification rejected — ${resolved.error}`);
+    return { queued: false, reason: resolved.error };
+  }
+
+  const phone = normalizePhone(data.to);
+  if (!phone.ok) {
+    console.error(
+      `[Queue] Template notification "${resolved.message.metaName}" rejected — invalid recipient (${phone.reason}).`
+    );
+    return { queued: false, reason: `invalid recipient: ${phone.reason}` };
+  }
+
+  const jobData = {
+    to: data.to,
+    templateKey,
+    templateName: resolved.message.metaName,
+    languageCode: resolved.message.language,
+    named: resolved.message.named,
+    dedupeKey: data.dedupeKey
+  };
+
+  if (redisClient && redisClient.status === 'ready') {
+    await notificationQueue.add('sendWhatsAppTemplate', jobData, NOTIFICATION_JOB_OPTIONS);
+    console.log(
+      `[Queue] Template notification "${jobData.templateName}" (${templateKey}) enqueued successfully.`
+    );
+  } else {
+    console.warn(
+      `[Queue] Redis not ready. Sending template "${jobData.templateName}" synchronously.`
+    );
+    await sendWhatsAppTemplate(jobData.to, jobData.templateName, jobData.languageCode, jobData.named, {
+      dedupeKey: jobData.dedupeKey
+    });
+  }
+  return { queued: true };
 };
 
 console.log('[BullMQ] Queues initialized.');

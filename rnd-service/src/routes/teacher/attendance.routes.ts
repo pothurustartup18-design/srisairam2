@@ -4,8 +4,7 @@ import { Teacher } from '../../models/teacher.model';
 import { requirePermission } from '../../middlewares/permission.middleware';
 import { Student } from '../../models/student.model';
 import { PermissionDelegation } from '../../models/permissionDelegation.model';
-import { renderTemplate } from '../../services/template.service';
-import { queueNotification } from '../../config/queue';
+import { queueTemplateNotification } from '../../config/queue';
 import { SystemConfig } from '../../models/systemConfig.model';
 import { clearCache } from '../../middlewares/cache.middleware';
 import { requireOwnStudent } from '../../middlewares/threadAccess.middleware';
@@ -170,31 +169,49 @@ router.post('/', requirePermission('attendance:mark'), async (req: Request, res:
               (r: any) => (r.student || '').toString() === rec.studentId
             );
 
+            // Proactive absence alerts now go out as the approved Meta templates
+            // (attendance_alert_full / _morning / _afternoon). Each of those
+            // templates already contains BOTH the English and Telugu sentences,
+            // so we send ONE template regardless of student.preferredLanguage and
+            // pass the student's name to both named params (student_name_en,
+            // student_name_te). The Meta template name lives in the registry
+            // (config/whatsappTemplates.ts), not here.
+            const nameParams = { student_name_en: studentName, student_name_te: studentName };
+
             if (isHalfDay) {
               if (rec.morningStatus === 'absent') {
                 const alreadyMarkedMorningAbsent = existingStudentRec?.morningStatus === 'absent';
                 if (!alreadyMarkedMorningAbsent) {
-                  const alertMsg = await renderTemplate('absenceAlertMorning', student.preferredLanguage, { studentName });
-                  await queueNotification('sendWhatsAppText', { to: student.whatsappNo, text: alertMsg });
-                  console.log(`[Attendance WhatsApp Alert] Morning alert queued for student ${studentName} to ${student.whatsappNo}`);
+                  await queueTemplateNotification('attendance.morning', {
+                    to: student.whatsappNo,
+                    params: nameParams,
+                    dedupeKey: `attendance:${dateStr}:${rec.studentId}:morning`
+                  });
+                  console.log(`[Attendance WhatsApp Alert] Morning template queued for student ${studentName} to ${student.whatsappNo}`);
                 }
               }
 
               if (rec.afternoonStatus === 'absent') {
                 const alreadyMarkedAfternoonAbsent = existingStudentRec?.afternoonStatus === 'absent';
                 if (!alreadyMarkedAfternoonAbsent) {
-                  const alertMsg = await renderTemplate('absenceAlertAfternoon', student.preferredLanguage, { studentName });
-                  await queueNotification('sendWhatsAppText', { to: student.whatsappNo, text: alertMsg });
-                  console.log(`[Attendance WhatsApp Alert] Afternoon alert queued for student ${studentName} to ${student.whatsappNo}`);
+                  await queueTemplateNotification('attendance.afternoon', {
+                    to: student.whatsappNo,
+                    params: nameParams,
+                    dedupeKey: `attendance:${dateStr}:${rec.studentId}:afternoon`
+                  });
+                  console.log(`[Attendance WhatsApp Alert] Afternoon template queued for student ${studentName} to ${student.whatsappNo}`);
                 }
               }
             } else {
               if (rec.status === 'absent') {
                 const alreadyMarkedAbsent = existingStudentRec?.status === 'absent';
                 if (!alreadyMarkedAbsent) {
-                  const alertMsg = await renderTemplate('absenceAlert', student.preferredLanguage, { studentName });
-                  await queueNotification('sendWhatsAppText', { to: student.whatsappNo, text: alertMsg });
-                  console.log(`[Attendance WhatsApp Alert] Daily alert queued for student ${studentName} to ${student.whatsappNo}`);
+                  await queueTemplateNotification('attendance.full', {
+                    to: student.whatsappNo,
+                    params: nameParams,
+                    dedupeKey: `attendance:${dateStr}:${rec.studentId}:full`
+                  });
+                  console.log(`[Attendance WhatsApp Alert] Full-day template queued for student ${studentName} to ${student.whatsappNo}`);
                 }
               }
             }

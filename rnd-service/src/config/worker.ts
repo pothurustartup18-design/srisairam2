@@ -3,8 +3,8 @@ import { generateStudentCSV } from '../services/backup.service';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { getS3Client } from '../services/s3.service';
 import { Student } from '../models/student.model';
-import { sendWhatsAppAuto, sendWhatsAppMediaDetailed, dispatchResolvedDelivery } from '../services/whatsapp.service';
 import { connectionOptions } from './queue';
+import { processNotificationJob } from '../services/notificationJobHandler';
 
 // 1. Backup Queue Worker
 const backupWorker = new Worker('backupQueue', async job => {
@@ -48,28 +48,12 @@ backupWorker.on('failed', (job, err) => {
 });
 
 // 2. Notification Queue Worker
-const notificationWorker = new Worker('notificationQueue', async job => {
-  console.log(`[Worker] Started processing notification job ${job.id} (Type: ${job.name})`);
-  try {
-    if (job.name === 'sendWhatsAppText') {
-      const { to, text } = job.data;
-      const success = await sendWhatsAppAuto(to, text);
-      if (!success) throw new Error('WhatsApp text send failed');
-    } else if (job.name === 'sendWhatsAppMedia') {
-      const { to, mediaUrl, type, filename, caption } = job.data;
-      const result = await sendWhatsAppMediaDetailed(to, mediaUrl, type, filename, caption);
-      if (!result.success) throw new Error(`WhatsApp media send failed: ${result.error?.reason || 'unknown'}`);
-    } else if (job.name === 'sendWhatsAppResolved') {
-      const { to, resolved } = job.data;
-      const result = await dispatchResolvedDelivery(to, resolved);
-      if (!result.success) throw new Error(`WhatsApp resolved send failed: ${result.error?.reason || 'unknown'}`);
-    }
-    console.log(`[Worker] Successfully completed notification job ${job.id}`);
-  } catch (err: any) {
-    console.error(`[Worker] Failed notification job ${job.id}:`, err.message);
-    throw err;
-  }
-}, { connection: connectionOptions });
+// Handles: sendWhatsAppText, sendWhatsAppMedia, sendWhatsAppResolved, sendWhatsAppTemplate.
+// Dispatch logic lives in services/notificationJobHandler.ts so it is testable
+// without a live Redis/BullMQ connection.
+const notificationWorker = new Worker('notificationQueue', job => processNotificationJob(job), {
+  connection: connectionOptions
+});
 
 notificationWorker.on('failed', (job, err) => {
   console.error(`[Worker] Notification job ${job?.id} failed with error:`, err.message);

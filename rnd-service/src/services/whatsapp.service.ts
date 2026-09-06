@@ -551,20 +551,65 @@ export async function sendWhatsAppText(to: string, text: string, options?: SendO
   return (await sendWhatsAppTextDetailed(to, text, options)).success;
 }
 
-/** Send an approved template message. */
+/**
+ * Body parameters for a template send.
+ *  - `string[]`               → POSITIONAL params ({{1}}, {{2}}, …). Unchanged
+ *                               legacy behavior (used by the 24h re-engagement
+ *                               fallback and staff-credential templates).
+ *  - `Record<string,string>`  → NAMED params ({{student_name_en}}, …). Each
+ *                               parameter object carries a `parameter_name`, as
+ *                               required by the Cloud API when the approved
+ *                               template's parameter_format is NAMED (v23.0).
+ *
+ * Named and positional are never mixed — a template is one or the other.
+ */
+export type TemplateBodyParameters = string[] | Record<string, string>;
+
+/**
+ * Build the `components` array for a template payload.
+ * Returns undefined when there are no body parameters (e.g. a static template).
+ */
+export function buildTemplateComponents(
+  bodyParameters: TemplateBodyParameters
+): Array<Record<string, unknown>> | undefined {
+  if (Array.isArray(bodyParameters)) {
+    if (bodyParameters.length === 0) return undefined;
+    return [
+      {
+        type: 'body',
+        parameters: bodyParameters.map((text) => ({ type: 'text', text: String(text) }))
+      }
+    ];
+  }
+
+  const entries = Object.entries(bodyParameters || {});
+  if (entries.length === 0) return undefined;
+  return [
+    {
+      type: 'body',
+      parameters: entries.map(([parameterName, text]) => ({
+        type: 'text',
+        parameter_name: parameterName,
+        text: String(text)
+      }))
+    }
+  ];
+}
+
+/** Send an approved template message (positional OR named body parameters). */
 export async function sendWhatsAppTemplate(
   to: string,
   templateName: string,
   languageCode: string,
-  bodyParameters: string[] = [],
+  bodyParameters: TemplateBodyParameters = [],
   options?: SendOptions,
   _isFallback = false
 ): Promise<WhatsAppSendResult> {
   try {
-    const components =
-      bodyParameters.length > 0
-        ? [{ type: 'body', parameters: bodyParameters.map((text) => ({ type: 'text', text })) }]
-        : undefined;
+    const components = buildTemplateComponents(bodyParameters);
+    const previewParts = Array.isArray(bodyParameters)
+      ? bodyParameters
+      : Object.entries(bodyParameters || {}).map(([k, v]) => `${k}=${v}`);
     return await dispatch({
       to,
       messageType: 'template',
@@ -576,7 +621,7 @@ export async function sendWhatsAppTemplate(
           ...(components ? { components } : {})
         }
       },
-      bodyPreview: `[template:${templateName}] ${bodyParameters.join(' | ')}`,
+      bodyPreview: `[template:${templateName}] ${previewParts.join(' | ')}`,
       templateName,
       options,
       _isFallback
