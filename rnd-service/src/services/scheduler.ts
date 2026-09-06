@@ -2,8 +2,7 @@ import crypto from 'crypto';
 import { ScheduledAlert } from '../models/scheduledAlert.model';
 import { Student } from '../models/student.model';
 import { Teacher } from '../models/teacher.model';
-import { resolveWhatsAppDelivery, dispatchResolvedDelivery, normalizePhone, OutgoingAttachment } from './whatsapp.service';
-import { getMediaType, extractS3Key, getS3ObjectSize } from './s3.service';
+import { normalizePhone } from './whatsapp.service';
 import { queueTemplateNotification } from '../config/queue';
 
 /** Delivery instruction for a broadcast that must go out as an approved Meta template. */
@@ -36,11 +35,12 @@ const teacherMatchesFilters = (assignedClass: string, filters?: BroadcastFilters
     .some(cls => classSet.has(cls));
 };
 
-// Actual broadcast execution logic (also used for immediate event alerts).
-// When `template` is supplied, delivery goes out as an approved Meta template
-// through queueTemplateNotification → BullMQ → worker (the correct path for a
-// PROACTIVE notification outside the 24h window); otherwise the legacy free-form
-// path is used (still valid for in-conversation / test broadcasts).
+// Broadcast execution for notices / events. Delivery ALWAYS goes out as an
+// approved Meta template (announcement.broadcast / event.announcement) through
+// queueTemplateNotification → BullMQ → worker — the only correct path for a
+// PROACTIVE notification. A broadcast with no `template` is BLOCKED (never
+// free-form): there is no approved template for it, and Meta rejects proactive
+// free-form outside the 24h window anyway.
 export const executeAlertBroadcast = async (
   title: string,
   message: string,
@@ -51,6 +51,13 @@ export const executeAlertBroadcast = async (
   template?: BroadcastTemplate
 ) => {
   try {
+    if (!template) {
+      console.warn(
+        `[Scheduler] BLOCKED: broadcast "${title}" has no approved WhatsApp template — NOT sent ` +
+          `(proactive free-form WhatsApp is disabled).`
+      );
+      return;
+    }
     let recipients: string[] = [];
 
     if (sendAlertsTo === 'parents' || sendAlertsTo === 'both') {
@@ -81,51 +88,27 @@ export const executeAlertBroadcast = async (
     // Deduplicate
     recipients = Array.from(new Set(recipients)).filter(Boolean);
 
-    // Normalize media list (supports older scheduled alerts too)
     const urls = mediaUrls && mediaUrls.length > 0 ? mediaUrls : (mediaUrl ? [mediaUrl] : []);
-
-    // ── Approved-template delivery (proactive, works outside the 24h window) ──
-    if (template) {
-      if (urls.length > 0) {
-        console.warn(
-          `[Scheduler] "${title}": ${urls.length} media attachment(s) NOT sent over WhatsApp — ` +
-            `the approved ${template.key} template is text-only. Media remains available in the ERP.`
-        );
-      }
-      const salt =
-        template.dedupeSalt || crypto.createHash('sha256').update(`${title}\n${message}`).digest('hex').slice(0, 12);
-      console.log(
-        `[Scheduler] Broadcasting "${title}" as template ${template.key} to ${recipients.length} recipient(s)...`
+    if (urls.length > 0) {
+      console.warn(
+        `[Scheduler] "${title}": ${urls.length} media attachment(s) NOT sent over WhatsApp — ` +
+          `the approved ${template.key} template is text-only. Media remains available in the ERP.`
       );
-      for (const phone of recipients) {
-        const norm = normalizePhone(phone);
-        const keyPhone = norm.ok ? norm.e164 : String(phone).replace(/\D/g, '');
-        await queueTemplateNotification(template.key, {
-          to: phone,
-          params: template.params,
-          dedupeKey: `${template.key}:${salt}:${keyPhone}`
-        });
-      }
-      return;
     }
 
-    const attachments: OutgoingAttachment[] = await Promise.all(
-      urls.map(async (url): Promise<OutgoingAttachment> => {
-        const s3Key = extractS3Key(url);
-        const size = s3Key ? await getS3ObjectSize(s3Key) : null;
-        return { url, type: getMediaType(url), size: size ?? undefined };
-      })
+    const salt =
+      template.dedupeSalt || crypto.createHash('sha256').update(`${title}\n${message}`).digest('hex').slice(0, 12);
+    console.log(
+      `[Scheduler] Broadcasting "${title}" as template ${template.key} to ${recipients.length} recipient(s)...`
     );
-
-    console.log(`[Scheduler] Broadcasting alert: "${title}" to ${recipients.length} recipients...`);
-
-    // Resolved ONCE for the whole broadcast — with 2+ event photos/videos (or any
-    // single file over Meta's per-type cap) this uploads one shared gallery page
-    // rather than re-uploading it once per recipient.
-    const resolved = await resolveWhatsAppDelivery(message, attachments);
-
     for (const phone of recipients) {
-      await dispatchResolvedDelivery(phone, resolved);
+      const norm = normalizePhone(phone);
+      const keyPhone = norm.ok ? norm.e164 : String(phone).replace(/\D/g, '');
+      await queueTemplateNotification(template.key, {
+        to: phone,
+        params: template.params,
+        dedupeKey: `${template.key}:${salt}:${keyPhone}`
+      });
     }
   } catch (error) {
     console.error('[Scheduler] Error executing scheduled broadcast:', error);

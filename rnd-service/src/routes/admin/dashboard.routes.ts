@@ -12,11 +12,10 @@ import { requirePermission } from '../../middlewares/permission.middleware';
 import { audit } from '../../middlewares/audit.middleware';
 import { getS3Client, getPresignedDownloadUrl } from '../../services/s3.service';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
-import { sendWhatsAppTextDetailed, sendWhatsAppMediaDetailed, resolveWhatsAppDelivery, dispatchResolvedDelivery, normalizeAttachments } from '../../services/whatsapp.service';
-import { renderTemplate } from '../../services/template.service';
+import { blockedNotice } from '../../config/whatsappTemplates';
 import { runInstallmentReminderSweep } from '../../services/scheduler';
 import { ScheduledAlert } from '../../models/scheduledAlert.model';
-import { queueNotification, queueTemplateNotification } from '../../config/queue';
+import { queueTemplateNotification } from '../../config/queue';
 
 import { User } from '../../models/user.model';
 
@@ -270,34 +269,19 @@ router.post('/send-reminder', requirePermission('fees:view'), async (req: Reques
       });
     }
 
-    const defaultMessage = await renderTemplate('feeReminder', preferredLanguage, {
-      studentName,
-      amount: amountToRemind.toLocaleString()
-    });
-
-    // If a custom message is supplied, append a Telugu version of it
-    let finalMessage: string;
-    if (customMessage) {
-      // Build bilingual: custom English + auto-translated Telugu preamble
-      const teluguNote = `ప్రియమైన తల్లిదండ్రులారా, ${studentName} కి సంబంధించిన ₹${amountToRemind.toLocaleString()} ఫీజు బకాయిల కొరకు ఈ రిమైండర్.`;
-      finalMessage = `${customMessage}\n\n${teluguNote}`;
-    } else {
-      finalMessage = defaultMessage;
-    }
-
-    // Queue message via WhatsApp queue
-    await queueNotification('sendWhatsAppText', { recipient, to: recipient, text: finalMessage });
-
-    return res.status(200).json({
-      success: true,
-      message: 'WhatsApp fee reminder queued in the background.',
-      details: {
-        to: recipient,
-        studentName,
-        pendingAmount: amountToRemind,
-        messageSent: finalMessage,
-        log: `WhatsApp reminder queued for ${recipient}`,
-      },
+    // A GENERAL fee/dues reminder has no installment number or due date, so it
+    // cannot use installment_reminder / installment_overdue, and there is no
+    // other approved Meta template for it. Proactive free-form WhatsApp is
+    // disabled — do NOT send, do NOT report success. (Installment dues have their
+    // own path: "Run Installment Reminders" → installment_reminder / _overdue.)
+    void customMessage;
+    void preferredLanguage;
+    console.warn(
+      `[BLOCKED] /send-reminder: general fee reminder for ${studentName} (${recipient}) NOT sent — no approved WhatsApp template.`
+    );
+    return res.status(422).json({
+      ...blockedNotice('fee.general_reminder'),
+      details: { to: recipient, studentName, pendingAmount: amountToRemind, feeCategory: feeCategory || 'all' }
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });
@@ -315,46 +299,13 @@ router.get('/scheduled-reminders', requirePermission('fees:view'), async (req: R
 });
 
 // POST /dashboard/schedule-reminders
-router.post('/schedule-reminders', requirePermission('fees:collect'), audit('fees:schedule-reminders'), async (req: Request, res: Response) => {
-  try {
-    const { studentIds, scheduledTimes, message } = req.body;
-    if (!studentIds || !Array.isArray(studentIds) || studentIds.length === 0) {
-      return res.status(400).json({ success: false, message: 'studentIds array is required.' });
-    }
-    if (!scheduledTimes || !Array.isArray(scheduledTimes) || scheduledTimes.length === 0) {
-      return res.status(400).json({ success: false, message: 'scheduledTimes array is required.' });
-    }
-    if (!message) {
-      return res.status(400).json({ success: false, message: 'message content is required.' });
-    }
-
-    const createdAlerts: any[] = [];
-
-    for (const timeStr of scheduledTimes) {
-      const scheduledDate = new Date(timeStr);
-      if (isNaN(scheduledDate.getTime())) {
-        return res.status(400).json({ success: false, message: `Invalid scheduled time format: ${timeStr}` });
-      }
-
-      const alert = await ScheduledAlert.create({
-        title: 'Scheduled Fee Reminder',
-        message,
-        sendAlertsTo: 'parents',
-        scheduledAt: scheduledDate,
-        status: 'pending',
-        studentIds
-      });
-      createdAlerts.push(alert);
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: `Successfully scheduled ${createdAlerts.length} reminder(s).`,
-      data: createdAlerts
-    });
-  } catch (error: any) {
-    return res.status(500).json({ success: false, error: error.message });
-  }
+router.post('/schedule-reminders', requirePermission('fees:collect'), audit('fees:schedule-reminders'), async (_req: Request, res: Response) => {
+  // A "Scheduled Fee Reminder" is a general fee/dues reminder — no approved Meta
+  // template exists for it, and proactive free-form WhatsApp is disabled, so we
+  // no longer schedule these (they would never actually deliver). Installment
+  // dues are handled by the daily sweep / "Run Installment Reminders".
+  console.warn('[BLOCKED] /schedule-reminders: general fee reminder scheduling disabled — no approved WhatsApp template.');
+  return res.status(422).json(blockedNotice('fee.general_reminder'));
 });
 
 // DELETE /dashboard/scheduled-reminders/:id
@@ -1047,39 +998,16 @@ router.post('/cluster-broadcast', requirePermission('whatsapp:send'), async (req
     }
 
     const phones = Array.from(phoneSet).filter(Boolean);
-    if (phones.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: `No WhatsApp numbers found for ${students.length} student(s) in cluster "${cluster}".`
-      });
-    }
 
-    // Resolve the delivery ONCE for the whole broadcast — if there are multiple
-    // attachments (or one too large for its type), this uploads a single shared
-    // gallery page rather than re-uploading it once per recipient.
-    const attachments = normalizeAttachments(req.body);
-    const resolved = await resolveWhatsAppDelivery(message.trim(), attachments);
-
-    // Send to all collected numbers in parallel
-    const results = await Promise.allSettled(
-      phones.map((phone) => dispatchResolvedDelivery(phone, resolved))
+    // Transport / "bus is coming" cluster alert is a PROACTIVE notification with
+    // no approved Meta template. Proactive free-form WhatsApp is disabled — do
+    // NOT send and do NOT report success.
+    console.warn(
+      `[BLOCKED] /cluster-broadcast: transport alert for cluster "${cluster}" (${phones.length} number(s)) NOT sent — no approved WhatsApp template.`
     );
-
-    const sent = results.filter((r) => r.status === 'fulfilled' && (r.value as any).success).length;
-    const failed = results.filter((r) => r.status === 'rejected' || (r.status === 'fulfilled' && !(r.value as any).success)).length;
-
-    return res.status(200).json({
-      success: true,
-      message: `Cluster broadcast sent to ${cluster}.`,
-      details: {
-        cluster,
-        studentsInCluster: students.length,
-        uniquePhoneNumbers: phones.length,
-        messagesSent: sent,
-        messagesFailed: failed,
-        totalAttempts: phones.length,
-        recipients: phones.map((p) => ({ phone: p, status: 'queued' }))
-      }
+    return res.status(422).json({
+      ...blockedNotice('transport.alert'),
+      details: { cluster, studentsInCluster: students.length, uniquePhoneNumbers: phones.length }
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });

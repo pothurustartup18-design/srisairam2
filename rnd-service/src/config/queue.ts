@@ -68,8 +68,11 @@ export const queueAssetOptimization = async (data: {
 };
 
 /**
- * Utility helper to queue notifications.
- * Falls back to synchronous execution if Redis client is not connected.
+ * @deprecated Free-form WhatsApp queue helper. No longer used for any ERP
+ * notification — every PROACTIVE notification must go through
+ * `queueTemplateNotification` (approved Meta template). Kept only so the worker
+ * can still drain any legacy `sendWhatsAppText` / `sendWhatsAppMedia` jobs left
+ * in Redis. Do NOT call this for new features.
  */
 export const queueNotification = async (jobName: 'sendWhatsAppText' | 'sendWhatsAppMedia', data: any) => {
   const redisClient = require('./redis').default;

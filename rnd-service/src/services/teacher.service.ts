@@ -138,25 +138,14 @@ export async function createTeacher(body: any) {
     console.log(`[Teacher Created] ${name} (Employee ID: ${finalEmpId}) — credentials delivered via WhatsApp.`);
   }
 
-  let whatsappSent = false;
-  try {
-    const { normalizePhone, sendWhatsAppTemplate } = require('./whatsapp.service');
-    const phoneResult = normalizePhone(phone);
-    if (phoneResult.ok && phoneResult.e164) {
-      const welcomeText = `Welcome to SchoolHub, ${name}! Your Employee Portal credentials are: Employee ID: ${finalEmpId} | Temporary Password: ${tempPassword} | Please change your password after first login.`;
-      const sent = await sendWhatsAppTemplate(phoneResult.e164, 'school_notification', 'en_US', [welcomeText]);
-      if (sent) {
-        whatsappSent = true;
-        console.log(`[WhatsApp Onboarding Dispatch] Successfully sent welcome credentials to: ${phoneResult.e164}`);
-      } else {
-        console.warn(`[WhatsApp Onboarding Dispatch] Delivery failed (sandbox restriction?) for: ${phoneResult.e164}`);
-      }
-    } else {
-      console.warn('[WhatsApp Onboarding Warning]: Phone number normalization failed:', phoneResult.reason);
-    }
-  } catch (err: any) {
-    console.error('[Teacher Registration Onboarding WhatsApp Error]:', err.message);
-  }
+  // BLOCKED: no approved Meta template for staff credentials (staff_credentials_new
+  // REJECTED, school_notification PENDING). Proactive free-form is disabled — the
+  // credentials are returned to the caller for the admin to relay.
+  const whatsappSent = false;
+  console.warn(
+    `[BLOCKED] Teacher onboarding credentials for ${name} (${phone}) NOT sent over WhatsApp — ` +
+      `no approved Meta template. Deliver credentials from the ERP response.`
+  );
 
   await PhoneVerification.deleteOne({ phone: cleanPhone });
 
@@ -324,19 +313,13 @@ export async function resetTeacherPassword(teacherId: string) {
     await redisClient.del(`user:profile:${user._id}`).catch(() => {});
   }
 
-  try {
-    const { normalizePhone, sendWhatsAppTemplate } = require('./whatsapp.service');
-    const phoneResult = normalizePhone(teacher.phone || user.phone || '');
-    if (phoneResult.ok && phoneResult.e164) {
-      const resetText = `Your SchoolHub password has been reset. Your credentials are: Username: ${user.email} | Password: ${tempPassword}`;
-      await sendWhatsAppTemplate(phoneResult.e164, 'school_notification', 'en_US', [resetText]);
-      console.log(`[WhatsApp Onboarding Reset Dispatch] Successfully sent reset credentials to: ${phoneResult.e164}`);
-    } else {
-      console.warn('[WhatsApp Onboarding Reset Warning]: Phone number normalization failed:', phoneResult.reason);
-    }
-  } catch (err: any) {
-    console.error('[Teacher Password Reset Onboarding WhatsApp Error]:', err.message);
-  }
+  // BLOCKED: no approved Meta template for staff password-reset credentials
+  // (staff_credentials_reset REJECTED, school_notification PENDING). Proactive
+  // free-form is disabled — the reset credentials are returned to the caller.
+  console.warn(
+    `[BLOCKED] Teacher password-reset credentials (${teacher.phone || user.phone || 'no phone'}) NOT sent over WhatsApp — ` +
+      `no approved Meta template. Deliver credentials from the ERP response.`
+  );
 }
 
 // ─── Documents vault ──────────────────────────────────────────────────────

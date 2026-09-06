@@ -11,31 +11,16 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 vi.mock('../../config/queue', () => ({
   queueTemplateNotification: vi.fn().mockResolvedValue({ queued: true })
 }));
-vi.mock('./s3.service', () => ({
-  getMediaType: () => 'image',
-  extractS3Key: () => null,
-  getS3ObjectSize: async () => null
-}));
-vi.mock('../whatsapp.service', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../whatsapp.service')>();
-  return {
-    ...actual,
-    resolveWhatsAppDelivery: vi.fn().mockResolvedValue({ mode: 'text', text: 'x' }),
-    dispatchResolvedDelivery: vi.fn().mockResolvedValue({ success: true })
-  };
-});
 vi.mock('../../models/student.model', () => ({ Student: { find: vi.fn() } }));
 vi.mock('../../models/teacher.model', () => ({ Teacher: { find: vi.fn() } }));
 vi.mock('../../models/scheduledAlert.model', () => ({ ScheduledAlert: { findOneAndUpdate: vi.fn() } }));
 
 import { runInstallmentReminderSweep, executeAlertBroadcast } from '../scheduler';
 import { queueTemplateNotification } from '../../config/queue';
-import { dispatchResolvedDelivery } from '../whatsapp.service';
 import { Student } from '../../models/student.model';
 import { Teacher } from '../../models/teacher.model';
 
 const qtn = queueTemplateNotification as unknown as ReturnType<typeof vi.fn>;
-const drd = dispatchResolvedDelivery as unknown as ReturnType<typeof vi.fn>;
 const studentFind = Student.find as unknown as ReturnType<typeof vi.fn>;
 const teacherFind = Teacher.find as unknown as ReturnType<typeof vi.fn>;
 
@@ -115,7 +100,6 @@ describe('executeAlertBroadcast(template) → per-recipient queueTemplateNotific
       dedupeSalt: 'evt-abc'
     });
 
-    expect(drd).not.toHaveBeenCalled();
     expect(qtn).toHaveBeenCalledTimes(2);
     for (const call of qtn.mock.calls) {
       expect(call[0]).toBe('announcement.broadcast');
@@ -141,16 +125,17 @@ describe('executeAlertBroadcast(template) → per-recipient queueTemplateNotific
 
     expect(qtn).toHaveBeenCalledTimes(1);
     expect(qtn.mock.calls[0][0]).toBe('event.announcement');
-    expect(drd).not.toHaveBeenCalled();
     expect(warn.mock.calls.map((c) => String(c[0])).join('\n')).toMatch(/media attachment\(s\) NOT sent/);
     warn.mockRestore();
   });
 
-  it('WITHOUT a template descriptor → legacy free-form path (dispatchResolvedDelivery)', async () => {
+  it('WITHOUT a template descriptor → BLOCKED (nothing queued, nothing sent free-form)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     studentFind.mockResolvedValue([{ whatsappNo: '8899582239' }]);
     teacherFind.mockResolvedValue([]);
     await executeAlertBroadcast('X', 'plain', 'parents', undefined, [], { classes: [], sections: [] });
     expect(qtn).not.toHaveBeenCalled();
-    expect(drd).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls.map((c) => String(c[0])).join('\n')).toMatch(/BLOCKED: broadcast "X" has no approved WhatsApp template/);
+    warn.mockRestore();
   });
 });

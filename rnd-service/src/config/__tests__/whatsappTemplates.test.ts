@@ -6,7 +6,9 @@ import { describe, it, expect } from 'vitest';
 import {
   WHATSAPP_TEMPLATES,
   getRegisteredTemplate,
-  resolveTemplateMessage
+  resolveTemplateMessage,
+  MISSING_TEMPLATES,
+  blockedNotice
 } from '../whatsappTemplates';
 
 const NAME = { student_name_en: 'Harsha', student_name_te: 'Harsha' };
@@ -264,5 +266,28 @@ describe('registry completeness — every active production template is register
     const banned = ['staff_credentials_new', 'staff_credentials_reset', 'hello_world', 'school_notification'];
     const registered = Object.values(WHATSAPP_TEMPLATES).map((t) => t.metaName);
     for (const b of banned) expect(registered).not.toContain(b);
+  });
+});
+
+describe('MISSING_TEMPLATES / blockedNotice — proactive features with no approved template', () => {
+  it('documents the 4 known gaps', () => {
+    expect(Object.keys(MISSING_TEMPLATES).sort()).toEqual(
+      ['auth.otp', 'fee.general_reminder', 'staff.credentials', 'transport.alert'].sort()
+    );
+  });
+
+  it('blockedNotice returns a non-success, non-retryable "not sent" payload', () => {
+    const n = blockedNotice('fee.general_reminder');
+    expect(n.success).toBe(false);
+    expect(n.blocked).toBe(true);
+    expect(n.reason).toBe('NO_APPROVED_TEMPLATE');
+    expect(n.missingTemplate).toBe('fee.general_reminder');
+    expect(n.message).toMatch(/was NOT sent/);
+    expect(n.message).toMatch(/installment_reminder/);
+  });
+
+  it('blockedNotice covers transport + staff credentials', () => {
+    expect(blockedNotice('transport.alert').message).toMatch(/bus/i);
+    expect(blockedNotice('staff.credentials').message).toMatch(/REJECTED/);
   });
 });

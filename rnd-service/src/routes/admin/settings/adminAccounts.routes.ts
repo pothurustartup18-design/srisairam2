@@ -8,7 +8,6 @@ import { Student } from '../../../models/student.model';
 import { User } from '../../../models/user.model';
 import { Teacher } from '../../../models/teacher.model';
 import { PhoneVerification } from '../../../models/phoneVerification.model';
-import { normalizePhone, sendWhatsAppTemplate } from '../../../services/whatsapp.service';
 import { clearCache } from '../../../middlewares/cache.middleware';
 import redisClient from '../../../config/redis';
 import { getEffectivePermissions } from '../../../services/permissionEngine';
@@ -127,19 +126,16 @@ router.post('/create-admin', requireRole(['admin']), requirePermission('settings
 
     // Credentials are delivered via WhatsApp only — do not log plaintext passwords to console in production
 
-    // 6. Dispatch onboarding welcome credentials via WhatsApp
-    let whatsappSent = false;
-    try {
-      const phoneResult = normalizePhone(newAdminPhone.trim());
-      if (phoneResult.ok && phoneResult.e164) {
-        const welcomeText = `Welcome to SchoolHub! Your employee credentials are: Login Portal: Employee | Username/ID: ${newUser.employeeId || newUser.username} | Password: ${generatedPassword}`;
-        await sendWhatsAppTemplate(phoneResult.e164, 'school_notification', 'en_US', [welcomeText]);
-        whatsappSent = true;
-        console.log(`[WhatsApp Onboarding Dispatch] Credentials successfully sent to: ${phoneResult.e164}`);
-      }
-    } catch (whatsappErr: any) {
-      console.error('[Employee Registration Onboarding WhatsApp Error]:', whatsappErr.message);
-    }
+    // 6. Onboarding credentials over WhatsApp are BLOCKED — staff_credentials_new
+    //    is REJECTED by Meta and school_notification is PENDING, so there is no
+    //    approved template. Proactive free-form is disabled. The plaintext
+    //    credentials are returned in this response for the admin to relay.
+    const whatsappSent = false;
+    console.warn(
+      `[BLOCKED] Employee onboarding credentials NOT sent over WhatsApp (${newAdminPhone}) — ` +
+        `no approved Meta template (staff_credentials_new REJECTED, school_notification PENDING). ` +
+        `Deliver credentials from the ERP response.`
+    );
 
     // Clean up the verified OTP document only after the transaction is fully complete and verified
     await PhoneVerification.deleteOne({ phone: cleanPhone });

@@ -130,10 +130,10 @@ const AdminReminders: React.FC<AdminRemindersProps> = ({
       if (data.success) {
         showToast('Pending fee reminder WhatsApp notification dispatched!', 'success');
       } else {
-        showToast(data.message || 'Failed to dispatch reminder.', 'error');
+        showToast(data.message || 'Reminder not sent — no approved WhatsApp template for a general fee reminder.', 'error');
       }
     } catch {
-      showToast('Simulated WhatsApp pending fee reminder sent successfully.', 'success');
+      showToast('Could not reach the server — reminder not sent.', 'error');
     }
   };
 
@@ -212,20 +212,31 @@ const AdminReminders: React.FC<AdminRemindersProps> = ({
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
     if (bulkReminderOption === 'immediate') {
-      let sentCount = 0;
+      let sent = 0;
+      let blocked = 0;
       for (const id of selectedStudentIds) {
         try {
-          await fetch(`${API_BASE}/dashboard/send-reminder`, {
+          const r = await fetch(`${API_BASE}/dashboard/send-reminder`, {
             method: 'POST',
             headers,
             body: JSON.stringify({ studentId: id, message: bulkCustomMessage })
           });
-          sentCount++;
+          const d = await r.json().catch(() => ({}));
+          if (d.success) sent++;
+          else blocked++;
         } catch {
-          sentCount++;
+          blocked++;
         }
       }
-      showToast(`Successfully broadcasted WhatsApp reminders to ${sentCount} parents!`, 'success');
+      if (sent > 0) {
+        showToast(`WhatsApp reminders sent to ${sent} parent(s).`, 'success');
+      } else {
+        showToast(
+          `No reminders sent (${blocked}). There is no approved WhatsApp template for a general fee reminder — ` +
+            `use "Run Installment Reminders" for installment dues.`,
+          'error'
+        );
+      }
       setSelectedStudentIds([]);
       setShowBulkReminderModal(false);
     } else {

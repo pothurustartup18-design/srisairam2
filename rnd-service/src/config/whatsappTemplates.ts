@@ -148,6 +148,45 @@ export function getRegisteredTemplate(key: string): RegisteredTemplate | undefin
   return (WHATSAPP_TEMPLATES as Record<string, RegisteredTemplate>)[key];
 }
 
+/**
+ * PROACTIVE notifications the ERP has, but for which NO approved Meta template
+ * exists. Per policy these MUST NOT be sent as free-form WhatsApp (Meta rejects
+ * proactive free-form outside the 24h window anyway). Each entry names the
+ * template that needs to be created + approved in WhatsApp Manager.
+ *
+ * `blockedNotice(key)` returns the standard "not sent" payload for a route.
+ */
+export const MISSING_TEMPLATES = {
+  'fee.general_reminder':
+    'General fee/dues reminder (school / books / transport totals — no installment number or due date). ' +
+    'Needs an approved UTILITY template, e.g. fee_due_reminder with named params ' +
+    'amount_en/te, fee_name_en/te, student_name_en/te. (Installment-specific dues already use installment_reminder / installment_overdue.)',
+  'transport.alert':
+    'Transport / "school bus approaching" cluster alert. Needs an approved UTILITY template, ' +
+    'e.g. transport_bus_alert (fixed text) or transport_alert with a single {custom} param.',
+  'staff.credentials':
+    'Staff onboarding / password-reset credentials. staff_credentials_new and staff_credentials_reset are ' +
+    'REJECTED by Meta; school_notification is PENDING. Needs new approved templates before any WhatsApp delivery.',
+  'auth.otp':
+    'Password-reset / phone-verification / profile-update OTP. Should use a Meta AUTHENTICATION-category ' +
+    'template (e.g. otp_code with one {code} param + copy-code button). Currently sent free-form — allowed ' +
+    'as an OTP exception, but delivery is unreliable to numbers outside an open conversation.'
+} as const;
+
+export type MissingTemplateKey = keyof typeof MISSING_TEMPLATES;
+
+export function blockedNotice(key: MissingTemplateKey) {
+  return {
+    success: false as const,
+    blocked: true as const,
+    reason: 'NO_APPROVED_TEMPLATE' as const,
+    missingTemplate: key,
+    message:
+      `No approved WhatsApp template exists for this notification, so it was NOT sent ` +
+      `(proactive free-form WhatsApp is disabled). ${MISSING_TEMPLATES[key]}`
+  };
+}
+
 export interface ResolvedTemplateMessage {
   /** Registry key, e.g. "attendance.full". */
   key: string;
