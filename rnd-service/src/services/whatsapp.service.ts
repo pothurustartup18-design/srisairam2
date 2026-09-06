@@ -29,11 +29,25 @@ import { resolveTenantConfig, DEFAULT_SCHOOL_ID, WhatsAppTenantConfig } from '..
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+/**
+ * Media for a template's HEADER component (templates whose header format is
+ * DOCUMENT / IMAGE / VIDEO — e.g. fee_receipt, report_card_notice).
+ * `link` must be a publicly fetchable URL (a presigned S3 URL is fine).
+ */
+export interface TemplateHeaderMedia {
+  type: 'document' | 'image' | 'video';
+  link: string;
+  /** Filename shown to the recipient — documents only. */
+  filename?: string;
+}
+
 export interface SendOptions {
   schoolId?: string;
   /** Caller-supplied idempotency key. Two calls with the same key send at most one message. */
   dedupeKey?: string;
   bypassQuota?: boolean;
+  /** HEADER media for a template send (ignored by non-template sends). */
+  templateHeader?: TemplateHeaderMedia;
 }
 
 export interface WhatsAppSendResult {
@@ -596,7 +610,18 @@ export function buildTemplateComponents(
   ];
 }
 
-/** Send an approved template message (positional OR named body parameters). */
+/**
+ * Build the HEADER component for a template with a media header
+ * (DOCUMENT / IMAGE / VIDEO). The Cloud API shape is:
+ *   { type: 'header', parameters: [ { type: 'document', document: { link, filename } } ] }
+ */
+export function buildTemplateHeaderComponent(header: TemplateHeaderMedia): Record<string, unknown> {
+  const media: Record<string, unknown> = { link: header.link };
+  if (header.type === 'document' && header.filename) media.filename = header.filename;
+  return { type: 'header', parameters: [{ type: header.type, [header.type]: media }] };
+}
+
+/** Send an approved template message (positional OR named body params, optional media header). */
 export async function sendWhatsAppTemplate(
   to: string,
   templateName: string,
@@ -606,10 +631,15 @@ export async function sendWhatsAppTemplate(
   _isFallback = false
 ): Promise<WhatsAppSendResult> {
   try {
-    const components = buildTemplateComponents(bodyParameters);
+    const bodyComponents = buildTemplateComponents(bodyParameters) || [];
+    const headerComponents = options?.templateHeader
+      ? [buildTemplateHeaderComponent(options.templateHeader)]
+      : [];
+    const components = [...headerComponents, ...bodyComponents];
     const previewParts = Array.isArray(bodyParameters)
-      ? bodyParameters
+      ? [...bodyParameters]
       : Object.entries(bodyParameters || {}).map(([k, v]) => `${k}=${v}`);
+    if (options?.templateHeader) previewParts.unshift(`[${options.templateHeader.type} header]`);
     return await dispatch({
       to,
       messageType: 'template',
@@ -618,7 +648,7 @@ export async function sendWhatsAppTemplate(
         template: {
           name: templateName,
           language: { code: languageCode },
-          ...(components ? { components } : {})
+          ...(components.length ? { components } : {})
         }
       },
       bodyPreview: `[template:${templateName}] ${previewParts.join(' | ')}`,

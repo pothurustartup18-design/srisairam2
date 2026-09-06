@@ -16,7 +16,7 @@ import { sendWhatsAppTextDetailed, sendWhatsAppMediaDetailed, resolveWhatsAppDel
 import { renderTemplate } from '../../services/template.service';
 import { runInstallmentReminderSweep } from '../../services/scheduler';
 import { ScheduledAlert } from '../../models/scheduledAlert.model';
-import { queueNotification } from '../../config/queue';
+import { queueNotification, queueTemplateNotification } from '../../config/queue';
 
 import { User } from '../../models/user.model';
 
@@ -415,7 +415,8 @@ router.post('/record-payment', requirePermission('fees:collect'), audit('fees:re
       receiptNo,
       amount: payAmount,
       date: now,
-      paymentMode: 'cash'
+      paymentMode: 'cash',
+      feeType
     });
 
     await student.save();
@@ -496,10 +497,11 @@ router.post('/record-payment', requirePermission('fees:collect'), audit('fees:re
   }
 });
 
-// Upload fee receipt PDF and dispatch to parent via WhatsApp
+// Upload fee receipt PDF and dispatch it to the parent as the approved
+// `fee_receipt` WhatsApp template (DOCUMENT header = the receipt PDF).
 router.post('/upload-receipt-pdf', requirePermission('fees:collect'), async (req: Request, res: Response) => {
   try {
-    const { receiptNo, pdfBase64, recipient, whatsappMessage } = req.body;
+    const { receiptNo, pdfBase64, recipient } = req.body;
     if (!receiptNo || !pdfBase64 || !recipient) {
       return res.status(400).json({ success: false, message: 'receiptNo, pdfBase64, and recipient are required.' });
     }
@@ -512,8 +514,7 @@ router.post('/upload-receipt-pdf', requirePermission('fees:collect'), async (req
     let studentSection = 'unknown';
     const year = new Date().getFullYear();
 
-    let student = null;
-    student = await Student.findOne({ 'payments.receiptNo': receiptNo });
+    const student = await Student.findOne({ 'payments.receiptNo': receiptNo });
 
     let resolvedFolder = 'unknown';
     if (student) {
@@ -535,18 +536,56 @@ router.post('/upload-receipt-pdf', requirePermission('fees:collect'), async (req
     const pdfUrl = await getPresignedDownloadUrl(s3Key);
     console.log(`Saved receipt PDF to AWS S3: ${pdfUrl}`);
 
-    // Queue WhatsApp message as document
-    await queueNotification('sendWhatsAppMedia', {
+    if (!student) {
+      return res.status(404).json({ success: false, message: `No student found for receipt ${receiptNo}.` });
+    }
+    const payment: any = (student.payments || []).find((p: any) => p.receiptNo === receiptNo);
+    const studentName = `${student.firstName || ''} ${student.lastName || ''}`.trim() || 'Student';
+    const amount = Number(req.body.amount ?? payment?.amount ?? 0);
+    const feeType: 'school' | 'books' | 'transport' =
+      req.body.feeType || payment?.feeType || 'school';
+    const feeNameEn =
+      feeType === 'books' ? 'Books Fee' : feeType === 'transport' ? 'Transport Fee' : 'Tuition Fee';
+    const feeNameTe =
+      feeType === 'books' ? 'పుస్తకాల రుసుము' : feeType === 'transport' ? 'రవాణా రుసుము' : 'పాఠశాల రుసుము';
+
+    // Build the verification URL from the real public origin of THIS request
+    // (nginx sets x-forwarded-*), falling back to APP_HOST.
+    const proto = String(req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0].trim();
+    const host = req.get('x-forwarded-host') || req.get('host') || process.env.APP_HOST || 'localhost:5173';
+    const verificationUrl = `${proto}://${host}/?verify_token=${receiptNo}`;
+
+    const amountStr = amount.toLocaleString('en-IN');
+    const templateResult = await queueTemplateNotification('fee.receipt', {
       to: recipient,
-      mediaUrl: pdfUrl,
-      type: 'document',
-      filename: `receipt_${receiptNo}.pdf`,
-      caption: whatsappMessage
+      dedupeKey: `fee-receipt:${receiptNo}`,
+      headerDocument: { link: pdfUrl, filename: `receipt_${receiptNo}.pdf` },
+      params: {
+        amount_en: amountStr,
+        fee_name_en: feeNameEn,
+        student_name_en: studentName,
+        receipt_number_en: receiptNo,
+        verification_url_en: verificationUrl,
+        student_name_te: studentName,
+        fee_name_te: feeNameTe,
+        amount_te: amountStr,
+        receipt_number_te: receiptNo,
+        verification_url_te: verificationUrl
+      }
     });
+
+    if (!templateResult.queued) {
+      console.error(`[FeeReceipt] Template not queued for ${receiptNo}: ${templateResult.reason}`);
+      return res.status(502).json({
+        success: false,
+        message: `Receipt PDF saved but WhatsApp template could not be queued: ${templateResult.reason}`,
+        pdfUrl
+      });
+    }
 
     return res.status(200).json({
       success: true,
-      message: 'Receipt PDF uploaded and WhatsApp send enqueued.',
+      message: 'Receipt PDF uploaded and fee_receipt WhatsApp template enqueued.',
       pdfUrl
     });
   } catch (error: any) {

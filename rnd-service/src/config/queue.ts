@@ -1,6 +1,12 @@
 import { Queue } from 'bullmq';
-import { sendWhatsAppAuto, sendWhatsAppMediaDetailed, sendWhatsAppTemplate, normalizePhone } from '../services/whatsapp.service';
-import { resolveTemplateMessage } from './whatsappTemplates';
+import {
+  sendWhatsAppAuto,
+  sendWhatsAppMediaDetailed,
+  sendWhatsAppTemplate,
+  normalizePhone,
+  TemplateHeaderMedia
+} from '../services/whatsapp.service';
+import { resolveTemplateMessage, getRegisteredTemplate } from './whatsappTemplates';
 import redisClient from './redis';
 
 export const connectionOptions = {
@@ -98,12 +104,30 @@ export type TemplateNotificationResult = { queued: boolean; reason?: string };
  */
 export const queueTemplateNotification = async (
   templateKey: string,
-  data: { to: string; params: Record<string, unknown>; dedupeKey?: string }
+  data: {
+    to: string;
+    params: Record<string, unknown>;
+    dedupeKey?: string;
+    /** Required for templates whose registry entry declares a media `header`. */
+    headerDocument?: { link: string; filename?: string };
+  }
 ): Promise<TemplateNotificationResult> => {
   const resolved = resolveTemplateMessage(templateKey, data.params || {});
   if (!resolved.ok) {
     console.error(`[Queue] Template notification rejected — ${resolved.error}`);
     return { queued: false, reason: resolved.error };
+  }
+
+  // Media header validation (headers are not body params, so checked here).
+  const def = getRegisteredTemplate(templateKey);
+  let header: TemplateHeaderMedia | undefined;
+  if (def?.header) {
+    if (!data.headerDocument?.link) {
+      const reason = `template "${templateKey}" requires a ${def.header.type} header (headerDocument.link missing)`;
+      console.error(`[Queue] Template notification rejected — ${reason}`);
+      return { queued: false, reason };
+    }
+    header = { type: def.header.type, link: data.headerDocument.link, filename: data.headerDocument.filename };
   }
 
   const phone = normalizePhone(data.to);
@@ -120,7 +144,8 @@ export const queueTemplateNotification = async (
     templateName: resolved.message.metaName,
     languageCode: resolved.message.language,
     named: resolved.message.named,
-    dedupeKey: data.dedupeKey
+    dedupeKey: data.dedupeKey,
+    header
   };
 
   if (redisClient && redisClient.status === 'ready') {
@@ -133,7 +158,8 @@ export const queueTemplateNotification = async (
       `[Queue] Redis not ready. Sending template "${jobData.templateName}" synchronously.`
     );
     await sendWhatsAppTemplate(jobData.to, jobData.templateName, jobData.languageCode, jobData.named, {
-      dedupeKey: jobData.dedupeKey
+      dedupeKey: jobData.dedupeKey,
+      ...(header ? { templateHeader: header } : {})
     });
   }
   return { queued: true };

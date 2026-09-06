@@ -5,18 +5,31 @@
  * Meta template names, language codes and parameter names live ONLY here — never
  * inline in routes/services. Each entry mirrors the approved template exactly.
  *
- * Verified against the live WABA (1559403392242390) on 2026-09-06:
- *   attendance_alert_full       en  APPROVED  UTILITY  parameter_format=NAMED
- *   attendance_alert_morning    en  APPROVED  UTILITY  parameter_format=NAMED
- *   attendance_alert_afternoon  en  APPROVED  UTILITY  parameter_format=NAMED
- * Body params for all three: student_name_en, student_name_te (single BODY
- * component, no header/buttons). The approved body text already contains BOTH
- * the English and Telugu sentences, so ONE template send covers both languages.
+ * Verified against the LIVE WABA (1559403392242390) on 2026-09-06 —
+ * GET /v23.0/1559403392242390/message_templates :
  *
- * Only attendance templates are wired up for now. fee_receipt / report_card_notice
- * and the pending installment/announcement/event templates are intentionally NOT
- * added yet.
+ *   attendance_alert_full        en  APPROVED  UTILITY  NAMED  BODY only
+ *   attendance_alert_morning     en  APPROVED  UTILITY  NAMED  BODY only
+ *   attendance_alert_afternoon   en  APPROVED  UTILITY  NAMED  BODY only
+ *       body params: student_name_en, student_name_te
+ *   fee_receipt                  en  APPROVED  UTILITY  NAMED  HEADER=DOCUMENT + BODY
+ *       body params: amount_en, fee_name_en, student_name_en, receipt_number_en,
+ *                    verification_url_en, student_name_te, fee_name_te, amount_te,
+ *                    receipt_number_te, verification_url_te
+ *   report_card_notice           en  APPROVED  UTILITY  NAMED  HEADER=DOCUMENT + BODY
+ *       body params: student_name_en, student_name_te
+ *
+ * Every approved body text already contains BOTH the English and Telugu
+ * sentences, so ONE template send covers both languages regardless of
+ * student.preferredLanguage.
+ *
+ * NOT registered (deliberately): installment_reminder / installment_overdue /
+ * announcement_broadcast / event_announcement are still "In review";
+ * staff_credentials_new / staff_credentials_reset are Rejected; hello_world is
+ * Meta's sample template. None of these may be wired.
  */
+
+export type TemplateHeaderType = 'document' | 'image' | 'video';
 
 export interface RegisteredTemplate {
   /** Exact Meta-approved template name. */
@@ -29,27 +42,59 @@ export interface RegisteredTemplate {
    * never positional indexes).
    */
   parameters: readonly string[];
+  /**
+   * Set when the approved template has a media HEADER component. The caller must
+   * then supply header media (see queueTemplateNotification `headerDocument`).
+   */
+  header?: { type: TemplateHeaderType };
   category: 'attendance' | 'fees' | 'reports' | 'announcements';
 }
+
+const ATTENDANCE_PARAMS = ['student_name_en', 'student_name_te'] as const;
 
 export const WHATSAPP_TEMPLATES = {
   'attendance.full': {
     metaName: 'attendance_alert_full',
     language: 'en',
-    parameters: ['student_name_en', 'student_name_te'],
+    parameters: ATTENDANCE_PARAMS,
     category: 'attendance'
   },
   'attendance.morning': {
     metaName: 'attendance_alert_morning',
     language: 'en',
-    parameters: ['student_name_en', 'student_name_te'],
+    parameters: ATTENDANCE_PARAMS,
     category: 'attendance'
   },
   'attendance.afternoon': {
     metaName: 'attendance_alert_afternoon',
     language: 'en',
-    parameters: ['student_name_en', 'student_name_te'],
+    parameters: ATTENDANCE_PARAMS,
     category: 'attendance'
+  },
+  'fee.receipt': {
+    metaName: 'fee_receipt',
+    language: 'en',
+    parameters: [
+      'amount_en',
+      'fee_name_en',
+      'student_name_en',
+      'receipt_number_en',
+      'verification_url_en',
+      'student_name_te',
+      'fee_name_te',
+      'amount_te',
+      'receipt_number_te',
+      'verification_url_te'
+    ],
+    header: { type: 'document' },
+    category: 'fees'
+  },
+  'report.card': {
+    metaName: 'report_card_notice',
+    language: 'en',
+    parameters: ATTENDANCE_PARAMS, // student_name_en, student_name_te
+    header: { type: 'document' },
+    category: 'reports'
   }
 } as const satisfies Record<string, RegisteredTemplate>;
 
@@ -71,6 +116,8 @@ export interface ResolvedTemplateMessage {
    * directly onto the Cloud API `components[].parameters[]` with `parameter_name`.
    */
   named: Record<string, string>;
+  /** The media HEADER this template requires, if any. */
+  header?: { type: TemplateHeaderType };
 }
 
 export type TemplateResolution =
@@ -85,6 +132,9 @@ export type TemplateResolution =
  *  - the key is not registered
  *  - a required named parameter is missing / null / blank
  *  - an unexpected parameter is supplied
+ *
+ * Header media is validated separately by queueTemplateNotification (it is not a
+ * body parameter).
  */
 export function resolveTemplateMessage(key: string, params: Record<string, unknown>): TemplateResolution {
   const def = getRegisteredTemplate(key);
@@ -110,5 +160,8 @@ export function resolveTemplateMessage(key: string, params: Record<string, unkno
   const named: Record<string, string> = {};
   for (const p of def.parameters) named[p] = String(params[p]).trim();
 
-  return { ok: true, message: { key, metaName: def.metaName, language: def.language, named } };
+  return {
+    ok: true,
+    message: { key, metaName: def.metaName, language: def.language, named, header: def.header }
+  };
 }

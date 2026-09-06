@@ -124,3 +124,57 @@ describe('queueTemplateNotification — synchronous fallback (Redis down)', () =
     );
   });
 });
+
+const FEE_PARAMS = {
+  amount_en: '986', fee_name_en: 'Tuition Fee', student_name_en: 'Harsha',
+  receipt_number_en: 'FEE-1', verification_url_en: 'https://e/v/FEE-1',
+  student_name_te: 'Harsha', fee_name_te: 'పాఠశాల రుసుము', amount_te: '986',
+  receipt_number_te: 'FEE-1', verification_url_te: 'https://e/v/FEE-1'
+};
+
+describe('queueTemplateNotification — document-header templates', () => {
+  it('enqueues fee.receipt with the header in the job payload', async () => {
+    const res = await queueTemplateNotification('fee.receipt', {
+      to: '8899582239',
+      params: FEE_PARAMS,
+      dedupeKey: 'fee-receipt:FEE-1',
+      headerDocument: { link: 'https://s3/receipt_FEE-1.pdf', filename: 'receipt_FEE-1.pdf' }
+    });
+    expect(res).toEqual({ queued: true });
+    const [jobName, jobData, opts] = addMock.mock.calls[0];
+    expect(jobName).toBe('sendWhatsAppTemplate');
+    expect(opts).toBe(NOTIFICATION_JOB_OPTIONS);
+    expect(jobData.templateName).toBe('fee_receipt');
+    expect(jobData.header).toEqual({
+      type: 'document',
+      link: 'https://s3/receipt_FEE-1.pdf',
+      filename: 'receipt_FEE-1.pdf'
+    });
+    expect(Object.keys(jobData.named)).toHaveLength(10);
+  });
+
+  it('rejects fee.receipt when the document header is missing (nothing queued)', async () => {
+    const res = await queueTemplateNotification('fee.receipt', { to: '8899582239', params: FEE_PARAMS });
+    expect(res.queued).toBe(false);
+    expect(res.reason).toMatch(/requires a document header/);
+    expect(addMock).not.toHaveBeenCalled();
+    expect(sendTemplateMock).not.toHaveBeenCalled();
+  });
+
+  it('report.card sync fallback passes templateHeader to sendWhatsAppTemplate', async () => {
+    redisState.status = 'end';
+    await queueTemplateNotification('report.card', {
+      to: '8899582239',
+      params: NAME,
+      dedupeKey: 'report-card:e1:s1',
+      headerDocument: { link: 'https://s3/rc.pdf', filename: 'report_card_ADM1.pdf' }
+    });
+    expect(sendTemplateMock).toHaveBeenCalledWith(
+      '8899582239',
+      'report_card_notice',
+      'en',
+      NAME,
+      { dedupeKey: 'report-card:e1:s1', templateHeader: { type: 'document', link: 'https://s3/rc.pdf', filename: 'report_card_ADM1.pdf' } }
+    );
+  });
+});

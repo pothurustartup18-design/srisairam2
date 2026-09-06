@@ -9,7 +9,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { resetWhatsAppConfigCache } from '../../config/whatsapp';
 import { SystemConfig } from '../../models/systemConfig.model';
 import { WhatsAppMessage } from '../../models/whatsappMessage.model';
-import { sendWhatsAppTemplate, buildTemplateComponents, _clearDedupeWindow } from '../whatsapp.service';
+import {
+  sendWhatsAppTemplate,
+  buildTemplateComponents,
+  buildTemplateHeaderComponent,
+  _clearDedupeWindow
+} from '../whatsapp.service';
 
 const VALID_TOKEN = 'EAAG' + 'x'.repeat(120);
 
@@ -173,5 +178,87 @@ describe('sendWhatsAppTemplate — positional parameters (regression)', () => {
       { type: 'text', text: '5000' }
     ]);
     expect(body.template.components[0].parameters[0]).not.toHaveProperty('parameter_name');
+  });
+});
+
+describe('buildTemplateHeaderComponent', () => {
+  it('builds a DOCUMENT header with filename', () => {
+    expect(
+      buildTemplateHeaderComponent({ type: 'document', link: 'https://s3/x.pdf', filename: 'receipt_FEE-1.pdf' })
+    ).toEqual({
+      type: 'header',
+      parameters: [{ type: 'document', document: { link: 'https://s3/x.pdf', filename: 'receipt_FEE-1.pdf' } }]
+    });
+  });
+
+  it('builds an IMAGE header (no filename key)', () => {
+    expect(buildTemplateHeaderComponent({ type: 'image', link: 'https://s3/x.jpg' })).toEqual({
+      type: 'header',
+      parameters: [{ type: 'image', image: { link: 'https://s3/x.jpg' } }]
+    });
+  });
+});
+
+describe('sendWhatsAppTemplate — DOCUMENT header (fee_receipt / report_card_notice)', () => {
+  const FEE_PARAMS = {
+    amount_en: '986',
+    fee_name_en: 'Tuition Fee',
+    student_name_en: 'Harsha',
+    receipt_number_en: 'FEE-2026-390014',
+    verification_url_en: 'https://erp.example.com/?verify_token=FEE-2026-390014',
+    student_name_te: 'Harsha',
+    fee_name_te: 'పాఠశాల రుసుము',
+    amount_te: '986',
+    receipt_number_te: 'FEE-2026-390014',
+    verification_url_te: 'https://erp.example.com/?verify_token=FEE-2026-390014'
+  };
+
+  it('puts the header component first, then the body, with parameter_name on all 10 body params', async () => {
+    fetchMock.mockResolvedValueOnce(okResponse('wamid.FEE'));
+    const result = await sendWhatsAppTemplate('8899582239', 'fee_receipt', 'en', FEE_PARAMS, {
+      templateHeader: { type: 'document', link: 'https://s3/receipt_FEE-2026-390014.pdf', filename: 'receipt_FEE-2026-390014.pdf' }
+    });
+    expect(result.success).toBe(true);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.template.name).toBe('fee_receipt');
+    const [header, bodyComp] = body.template.components;
+    expect(header).toEqual({
+      type: 'header',
+      parameters: [
+        { type: 'document', document: { link: 'https://s3/receipt_FEE-2026-390014.pdf', filename: 'receipt_FEE-2026-390014.pdf' } }
+      ]
+    });
+    expect(bodyComp.type).toBe('body');
+    expect(bodyComp.parameters).toHaveLength(10);
+    expect(bodyComp.parameters.every((p: any) => typeof p.parameter_name === 'string' && p.type === 'text')).toBe(true);
+    expect(bodyComp.parameters.map((p: any) => p.parameter_name)).toEqual(Object.keys(FEE_PARAMS));
+  });
+
+  it('report_card_notice: header + 2 named body params', async () => {
+    fetchMock.mockResolvedValueOnce(okResponse('wamid.RC'));
+    await sendWhatsAppTemplate('8899582239', 'report_card_notice', 'en', {
+      student_name_en: 'Aarav Patel',
+      student_name_te: 'Aarav Patel'
+    }, {
+      templateHeader: { type: 'document', link: 'https://s3/rc.pdf', filename: 'report_card_ADM1.pdf' }
+    });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.template.components[0].type).toBe('header');
+    expect(body.template.components[0].parameters[0].document.filename).toBe('report_card_ADM1.pdf');
+    expect(body.template.components[1].parameters.map((p: any) => p.parameter_name)).toEqual([
+      'student_name_en',
+      'student_name_te'
+    ]);
+  });
+
+  it('records templateName for a document template', async () => {
+    fetchMock.mockResolvedValueOnce(okResponse());
+    await sendWhatsAppTemplate('8899582239', 'fee_receipt', 'en', FEE_PARAMS, {
+      templateHeader: { type: 'document', link: 'https://s3/r.pdf', filename: 'r.pdf' }
+    });
+    expect(createSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ messageType: 'template', templateName: 'fee_receipt' })
+    );
   });
 });

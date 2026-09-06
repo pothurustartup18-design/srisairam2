@@ -49,6 +49,31 @@ describe('processNotificationJob — sendWhatsAppTemplate', () => {
     );
   });
 
+  it('forwards a document header (fee_receipt) as templateHeader', async () => {
+    await processNotificationJob({
+      id: 'j3',
+      name: 'sendWhatsAppTemplate',
+      data: {
+        to: '918899582239',
+        templateName: 'fee_receipt',
+        languageCode: 'en',
+        named: { amount_en: '986' },
+        dedupeKey: 'fee-receipt:FEE-1',
+        header: { type: 'document', link: 'https://s3/r.pdf', filename: 'receipt_FEE-1.pdf' }
+      }
+    });
+    expect(templateMock).toHaveBeenCalledWith(
+      '918899582239',
+      'fee_receipt',
+      'en',
+      { amount_en: '986' },
+      {
+        dedupeKey: 'fee-receipt:FEE-1',
+        templateHeader: { type: 'document', link: 'https://s3/r.pdf', filename: 'receipt_FEE-1.pdf' }
+      }
+    );
+  });
+
   it('throws (so BullMQ retries) when the template send fails', async () => {
     templateMock.mockResolvedValueOnce({ success: false, error: { reason: 'template paused' } });
     await expect(

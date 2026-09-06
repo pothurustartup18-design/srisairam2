@@ -10,6 +10,7 @@ import { PermissionDelegation } from '../../models/permissionDelegation.model';
 import { audit } from '../../middlewares/audit.middleware';
 import { getS3Client, getPresignedDownloadUrl, PRESIGN_EXPIRY_2_HOURS } from '../../services/s3.service';
 import { getGradeBands, gradeFor } from '../../services/grading.service';
+import { queueTemplateNotification } from '../../config/queue';
 
 const router = Router();
 
@@ -518,6 +519,70 @@ router.post('/upload-pdf', requirePermission('marks:entry'), async (req: Request
     });
   } catch (error: any) {
     console.error('Error uploading PDF to S3:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Send the generated report card to the parent as the approved
+// `report_card_notice` WhatsApp template (DOCUMENT header = the report-card PDF).
+// The frontend uploads the PDF first (POST /upload-pdf, which stores
+// studentMarks.pdfUrl), then calls this to dispatch it.
+router.post('/:examId/report-card/:studentId/whatsapp', requirePermission('marks:entry'), async (req: Request, res: Response) => {
+  try {
+    const { examId, studentId } = req.params;
+
+    const exam = await Exam.findById(examId).lean();
+    if (!exam) {
+      return res.status(404).json({ success: false, message: 'Exam record not found.' });
+    }
+    const smRecord = (exam.studentMarks || []).find((sm: any) => String(sm.student) === String(studentId));
+    if (!smRecord || !smRecord.pdfUrl) {
+      return res.status(400).json({
+        success: false,
+        message: 'Report card PDF not generated yet for this student. Generate/upload it first.'
+      });
+    }
+
+    if (!String(smRecord.pdfUrl).includes('.amazonaws.com/')) {
+      return res.status(400).json({ success: false, message: 'Stored report-card PDF URL is not an S3 URL.' });
+    }
+    const s3Key = String(smRecord.pdfUrl).split('.amazonaws.com/')[1];
+    if (!s3Key) {
+      return res.status(400).json({ success: false, message: 'Could not parse the report-card S3 key.' });
+    }
+    const presignedUrl = await getPresignedDownloadUrl(s3Key, PRESIGN_EXPIRY_2_HOURS);
+
+    const student = await Student.findById(studentId);
+    if (!student) {
+      return res.status(404).json({ success: false, message: 'Student not found.' });
+    }
+    const whatsappNo = (student as any).whatsappNo;
+    if (!whatsappNo) {
+      return res.status(400).json({ success: false, message: 'Student has no WhatsApp number on file.' });
+    }
+    const studentName = `${student.firstName || ''} ${student.lastName || ''}`.trim() || 'Student';
+    const admissionNo = (student as any).admissionNo || String((student as any)._id);
+
+    const result = await queueTemplateNotification('report.card', {
+      to: whatsappNo,
+      dedupeKey: `report-card:${examId}:${studentId}`,
+      headerDocument: { link: presignedUrl, filename: `report_card_${admissionNo}.pdf` },
+      params: { student_name_en: studentName, student_name_te: studentName }
+    });
+
+    if (!result.queued) {
+      return res.status(502).json({
+        success: false,
+        message: `report_card_notice template could not be queued: ${result.reason}`
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'report_card_notice WhatsApp template enqueued.'
+    });
+  } catch (error: any) {
+    console.error('[ReportCard WhatsApp] Error:', error);
     return res.status(500).json({ success: false, error: error.message });
   }
 });

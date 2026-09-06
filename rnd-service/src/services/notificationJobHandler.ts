@@ -35,8 +35,11 @@ export async function processNotificationJob(job: NotificationJob): Promise<void
       const result = await dispatchResolvedDelivery(to, resolved);
       if (!result.success) throw new Error(`WhatsApp resolved send failed: ${result.error?.reason || 'unknown'}`);
     } else if (job.name === 'sendWhatsAppTemplate') {
-      const { to, templateName, languageCode, named, dedupeKey } = job.data;
-      const result = await sendWhatsAppTemplate(to, templateName, languageCode, named || {}, { dedupeKey });
+      const { to, templateName, languageCode, named, dedupeKey, header } = job.data;
+      const result = await sendWhatsAppTemplate(to, templateName, languageCode, named || {}, {
+        dedupeKey,
+        ...(header ? { templateHeader: header } : {})
+      });
       if (!result.success) throw new Error(`WhatsApp template send failed: ${result.error?.reason || 'unknown'}`);
     } else {
       console.warn(`[Worker] Unknown notification job type "${job.name}" — ignoring.`);

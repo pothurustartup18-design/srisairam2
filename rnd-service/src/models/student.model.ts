@@ -28,6 +28,8 @@ export interface IStudent extends Document {
     amount: number;
     date: Date;
     paymentMode: 'cash' | 'upi' | 'card' | 'bank_transfer';
+    /** Which fee bucket this payment settled — used to fill the fee_receipt WhatsApp template. */
+    feeType?: 'school' | 'books' | 'transport';
   }[];
   documents: {
     _id?: Types.ObjectId;
@@ -63,7 +65,8 @@ const PaymentSchema = new Schema({
   receiptNo: { type: String, required: true },
   amount: { type: Number, required: true },
   date: { type: Date, default: Date.now },
-  paymentMode: { type: String, enum: ['cash', 'upi', 'card', 'bank_transfer'], required: true }
+  paymentMode: { type: String, enum: ['cash', 'upi', 'card', 'bank_transfer'], required: true },
+  feeType: { type: String, enum: ['school', 'books', 'transport'] }
 });
 
 const StudentSchema = new Schema<IStudent>(
