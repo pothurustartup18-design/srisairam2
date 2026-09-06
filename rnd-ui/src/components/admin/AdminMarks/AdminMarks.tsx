@@ -465,17 +465,33 @@ const AdminMarks: React.FC<AdminMarksProps> = ({ students, teachers, classesList
     finally { setSharingStudentId(null); }
   };
 
-  const handleSendWhatsAppAlert = async (student: StudentData, _pdfUrl: string) => {
+  const handleSendWhatsAppAlert = async (student: StudentData, existingPdfUrl?: string) => {
     setSendingWhatsappId(student.id);
     const studentName = student.name || `${student.firstName || ''} ${student.lastName || ''}`.trim();
-    const permanentUrl = `${API_BASE}/report-card/view/${selectedExam?._id}/${student.id}`;
-    const messageText = `Dear Parent, the report card for ${studentName} for "${selectedExam?.examName}" is ready: ${permanentUrl}`;
     try {
+      if (!selectedExam) throw new Error('No exam selected');
+
+      // Ensure the report-card PDF is generated + stored against this student
+      // (POST /marks/upload-pdf persists studentMarks.pdfUrl) before dispatching.
+      if (!existingPdfUrl) {
+        showToast('Generating report card before sending...', 'success');
+        await uploadSingleStudentReportPDF(selectedExam, student, studentRemarks, assignedTeacher?.name || 'Class Teacher');
+        await handleLoadExamDetails(selectedExam._id);
+      }
+
       const token = getAccessToken();
       const headers: HeadersInit = { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
-      const res = await fetch(`${API_BASE}/messages/student/${student.id}/whatsapp`, { method: 'POST', headers, body: JSON.stringify({ text: messageText }) });
-      const d   = await res.json();
-      if (res.ok && d.success) showToast(`WhatsApp alert sent to ${studentName}'s parent!`);
+
+      // Proactive delivery goes out as the approved `report_card_notice` Meta
+      // template (DOCUMENT header = the report-card PDF), via the
+      // queue → worker → whatsapp.service pipeline (same endpoint the Teacher portal uses).
+      const res = await fetch(`${API_BASE}/marks/${selectedExam._id}/report-card/${student.id}/whatsapp`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({}),
+      });
+      const d = await res.json();
+      if (res.ok && d.success) showToast(`Report card WhatsApp sent to ${studentName}'s parent!`);
       else throw new Error(d.message || 'Failed');
     } catch (err: any) { showToast(err.message || 'Failed.', 'error'); }
     finally { setSendingWhatsappId(null); }
