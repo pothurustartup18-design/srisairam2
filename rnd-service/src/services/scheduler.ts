@@ -1,10 +1,22 @@
+import crypto from 'crypto';
 import { ScheduledAlert } from '../models/scheduledAlert.model';
 import { Student } from '../models/student.model';
 import { Teacher } from '../models/teacher.model';
-import { sendWhatsAppText, resolveWhatsAppDelivery, dispatchResolvedDelivery, OutgoingAttachment } from './whatsapp.service';
+import { resolveWhatsAppDelivery, dispatchResolvedDelivery, normalizePhone, OutgoingAttachment } from './whatsapp.service';
 import { getMediaType, extractS3Key, getS3ObjectSize } from './s3.service';
-import { renderTemplate } from './template.service';
-import { queueNotification } from '../config/queue';
+import { queueTemplateNotification } from '../config/queue';
+
+/** Delivery instruction for a broadcast that must go out as an approved Meta template. */
+export interface BroadcastTemplate {
+  key: string;
+  params: Record<string, string>;
+  /** Stable salt for the per-recipient dedupeKey (e.g. an eventId). */
+  dedupeSalt?: string;
+}
+
+/** Format a date the way the installment/event Meta templates expect ("10 September 2026"). */
+export const formatTemplateDate = (d: Date | string): string =>
+  new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 
 // Optional audience filters for broadcasts (empty/undefined = everyone)
 export interface BroadcastFilters {
@@ -24,14 +36,19 @@ const teacherMatchesFilters = (assignedClass: string, filters?: BroadcastFilters
     .some(cls => classSet.has(cls));
 };
 
-// Actual broadcast execution logic (also used for immediate event alerts)
+// Actual broadcast execution logic (also used for immediate event alerts).
+// When `template` is supplied, delivery goes out as an approved Meta template
+// through queueTemplateNotification → BullMQ → worker (the correct path for a
+// PROACTIVE notification outside the 24h window); otherwise the legacy free-form
+// path is used (still valid for in-conversation / test broadcasts).
 export const executeAlertBroadcast = async (
   title: string,
   message: string,
   sendAlertsTo: 'parents' | 'teachers' | 'both',
   mediaUrl?: string,
   mediaUrls?: string[],
-  filters?: BroadcastFilters
+  filters?: BroadcastFilters,
+  template?: BroadcastTemplate
 ) => {
   try {
     let recipients: string[] = [];
@@ -66,6 +83,32 @@ export const executeAlertBroadcast = async (
 
     // Normalize media list (supports older scheduled alerts too)
     const urls = mediaUrls && mediaUrls.length > 0 ? mediaUrls : (mediaUrl ? [mediaUrl] : []);
+
+    // ── Approved-template delivery (proactive, works outside the 24h window) ──
+    if (template) {
+      if (urls.length > 0) {
+        console.warn(
+          `[Scheduler] "${title}": ${urls.length} media attachment(s) NOT sent over WhatsApp — ` +
+            `the approved ${template.key} template is text-only. Media remains available in the ERP.`
+        );
+      }
+      const salt =
+        template.dedupeSalt || crypto.createHash('sha256').update(`${title}\n${message}`).digest('hex').slice(0, 12);
+      console.log(
+        `[Scheduler] Broadcasting "${title}" as template ${template.key} to ${recipients.length} recipient(s)...`
+      );
+      for (const phone of recipients) {
+        const norm = normalizePhone(phone);
+        const keyPhone = norm.ok ? norm.e164 : String(phone).replace(/\D/g, '');
+        await queueTemplateNotification(template.key, {
+          to: phone,
+          params: template.params,
+          dedupeKey: `${template.key}:${salt}:${keyPhone}`
+        });
+      }
+      return;
+    }
+
     const attachments: OutgoingAttachment[] = await Promise.all(
       urls.map(async (url): Promise<OutgoingAttachment> => {
         const s3Key = extractS3Key(url);
@@ -122,14 +165,30 @@ export const runInstallmentReminderSweep = async (): Promise<{ remindersSent: nu
       const repeatAllowed = !lastSent || now.getTime() - new Date(lastSent).getTime() > REMINDER_REPEAT_MS;
 
       if (isDueSoonOrOverdue && repeatAllowed && student.whatsappNo) {
-        const templateKey = installment.dueDate < now ? 'installmentOverdue' : 'installmentReminder';
-        const reminderMsg = await renderTemplate(templateKey, student.preferredLanguage, {
-          studentName: `${student.firstName} ${student.lastName}`,
-          installmentNo: String(installment.installmentNo),
-          amount: installment.amount.toLocaleString(),
-          dueDate: new Date(installment.dueDate).toLocaleDateString()
+        const key = installment.dueDate < now ? 'installment.overdue' : 'installment.reminder';
+        const studentName = `${student.firstName || ''} ${student.lastName || ''}`.trim() || 'Student';
+        const noStr = String(installment.installmentNo);
+        const amtStr = Number(installment.amount).toLocaleString('en-IN');
+        const dueStr = formatTemplateDate(installment.dueDate);
+        // The approved installment_reminder / installment_overdue templates are
+        // bilingual with named params; _te values match _en (only the sentence
+        // wrapper differs in the approved template).
+        await queueTemplateNotification(key, {
+          to: student.whatsappNo,
+          params: {
+            installment_no_en: noStr,
+            amount_en: amtStr,
+            student_name_en: studentName,
+            due_date_en: dueStr,
+            installment_no_te: noStr,
+            amount_te: amtStr,
+            student_name_te: studentName,
+            due_date_te: dueStr
+          },
+          dedupeKey: `${key}:${student._id}:${installment.installmentNo}:${new Date(installment.dueDate)
+            .toISOString()
+            .slice(0, 10)}:${now.toISOString().slice(0, 10)}`
         });
-        await queueNotification('sendWhatsAppText', { to: student.whatsappNo, text: reminderMsg });
         installment.reminderSentAt = now;
         changed = true;
         result.remindersSent++;
@@ -177,12 +236,25 @@ export const startDatabaseScheduler = () => {
 
         console.log(`[Scheduler] Processing alert: "${alert.title}" (ID: ${alert._id})`);
 
-        // Perform broadcast
-        await executeAlertBroadcast(alert.title, alert.message, alert.sendAlertsTo, alert.mediaUrl, alert.mediaUrls, {
-          classes: alert.classes,
-          sections: alert.sections,
-          studentIds: alert.studentIds
-        });
+        // Perform broadcast — as an approved template when the alert carries one
+        // (announcement.broadcast / event.announcement), else legacy free-form.
+        const alertTemplate: BroadcastTemplate | undefined = alert.templateKey
+          ? {
+              key: alert.templateKey,
+              params: (alert.templateParams || {}) as Record<string, string>,
+              dedupeSalt: alert.eventId || String(alert._id)
+            }
+          : undefined;
+
+        await executeAlertBroadcast(
+          alert.title,
+          alert.message,
+          alert.sendAlertsTo,
+          alert.mediaUrl,
+          alert.mediaUrls,
+          { classes: alert.classes, sections: alert.sections, studentIds: alert.studentIds },
+          alertTemplate
+        );
 
         // Mark as sent
         alert.status = 'sent';

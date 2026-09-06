@@ -173,6 +173,26 @@ const AdminReminders: React.FC<AdminRemindersProps> = ({
     }
   };
 
+  // Run the installment reminder / overdue sweep now (also runs daily at 9 AM).
+  // Sends the approved installment_reminder / installment_overdue Meta templates.
+  const [runningSweep, setRunningSweep] = useState(false);
+  const handleRunInstallmentSweep = async () => {
+    setRunningSweep(true);
+    try {
+      const token = getAccessToken();
+      const headers: HeadersInit = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch(`${API_BASE}/dashboard/run-installment-reminders`, { method: 'POST', headers });
+      const data = await res.json();
+      if (res.ok && data.success) showToast(data.message || 'Installment reminder sweep complete.', 'success');
+      else throw new Error(data.message || 'Sweep failed.');
+    } catch (err: any) {
+      showToast(err.message || 'Sweep failed.', 'error');
+    } finally {
+      setRunningSweep(false);
+    }
+  };
+
   // Bulk send reminder handler
   const handleBulkSendReminders = () => {
     if (selectedStudentIds.length === 0) return;
@@ -533,6 +553,20 @@ const AdminReminders: React.FC<AdminRemindersProps> = ({
               </div>
 
               <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  disabled={runningSweep}
+                  onClick={handleRunInstallmentSweep}
+                  title="Send installment reminders / overdue notices now (approved WhatsApp templates)"
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
+                    runningSweep
+                      ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                      : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                  }`}
+                >
+                  <RefreshCw size={13} className={runningSweep ? 'animate-spin' : ''} />
+                  {runningSweep ? 'Running…' : 'Run Installment Reminders'}
+                </button>
                 <button
                   type="button"
                   disabled={selectedStudentIds.length === 0}

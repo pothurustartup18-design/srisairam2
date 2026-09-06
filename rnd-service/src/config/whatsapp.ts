@@ -27,6 +27,14 @@ export interface WhatsAppTenantConfig {
   appSecret?: string;
   fallbackTemplateName: string;
   fallbackTemplateLang: string;
+  /**
+   * When true, a free-form send that hits Meta 131047 ("24h window closed") is
+   * retried as `fallbackTemplateName`. Default FALSE: the only configured
+   * fallback template (`school_notification`) is PENDING, not APPROVED, so using
+   * it would just produce a second failure. Set WHATSAPP_FALLBACK_ENABLED=true
+   * ONLY after pointing WHATSAPP_FALLBACK_TEMPLATE_NAME at an APPROVED template.
+   */
+  fallbackEnabled: boolean;
   defaultCountryCode: string;
   maxRetries: number;
   httpTimeoutMs: number;
@@ -137,6 +145,7 @@ export function evaluateWhatsAppEnv(): WhatsAppConfigResult {
     appSecret,
     fallbackTemplateName: readEnv('WHATSAPP_FALLBACK_TEMPLATE_NAME') || 'school_notification',
     fallbackTemplateLang: readEnv('WHATSAPP_FALLBACK_TEMPLATE_LANG') || 'en_US',
+    fallbackEnabled: (readEnv('WHATSAPP_FALLBACK_ENABLED') || '').toLowerCase() === 'true',
     defaultCountryCode: readEnv('WHATSAPP_DEFAULT_COUNTRY_CODE') || '91',
     maxRetries: intEnv('WHATSAPP_MAX_RETRIES', 3, 0, 10),
     httpTimeoutMs: intEnv('WHATSAPP_HTTP_TIMEOUT_MS', 15000, 1000, 120000),

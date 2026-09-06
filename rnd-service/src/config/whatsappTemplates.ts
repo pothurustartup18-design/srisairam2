@@ -8,25 +8,34 @@
  * Verified against the LIVE WABA (1559403392242390) on 2026-09-06 —
  * GET /v23.0/1559403392242390/message_templates :
  *
- *   attendance_alert_full        en  APPROVED  UTILITY  NAMED  BODY only
- *   attendance_alert_morning     en  APPROVED  UTILITY  NAMED  BODY only
- *   attendance_alert_afternoon   en  APPROVED  UTILITY  NAMED  BODY only
+ *   attendance_alert_full        en  APPROVED  UTILITY    NAMED  BODY only
+ *   attendance_alert_morning     en  APPROVED  UTILITY    NAMED  BODY only
+ *   attendance_alert_afternoon   en  APPROVED  UTILITY    NAMED  BODY only
  *       body params: student_name_en, student_name_te
- *   fee_receipt                  en  APPROVED  UTILITY  NAMED  HEADER=DOCUMENT + BODY
+ *   fee_receipt                  en  APPROVED  UTILITY    NAMED  HEADER=DOCUMENT + BODY
  *       body params: amount_en, fee_name_en, student_name_en, receipt_number_en,
  *                    verification_url_en, student_name_te, fee_name_te, amount_te,
  *                    receipt_number_te, verification_url_te
- *   report_card_notice           en  APPROVED  UTILITY  NAMED  HEADER=DOCUMENT + BODY
+ *   report_card_notice           en  APPROVED  UTILITY    NAMED  HEADER=DOCUMENT + BODY
  *       body params: student_name_en, student_name_te
+ *   installment_reminder         en  APPROVED  UTILITY    NAMED  BODY only
+ *   installment_overdue          en  APPROVED  UTILITY    NAMED  BODY only
+ *       body params: installment_no_en, amount_en, student_name_en, due_date_en,
+ *                    installment_no_te, amount_te, student_name_te, due_date_te
+ *   announcement_broadcast       en  APPROVED  MARKETING  NAMED  BODY only
+ *       body params: custom
+ *   event_announcement           en  APPROVED  MARKETING  NAMED  BODY only
+ *       body params: event_title, event_date, event_description
  *
  * Every approved body text already contains BOTH the English and Telugu
- * sentences, so ONE template send covers both languages regardless of
- * student.preferredLanguage.
+ * sentences (where bilingual), so ONE template send covers both languages
+ * regardless of student.preferredLanguage.
  *
- * NOT registered (deliberately): installment_reminder / installment_overdue /
- * announcement_broadcast / event_announcement are still "In review";
- * staff_credentials_new / staff_credentials_reset are Rejected; hello_world is
- * Meta's sample template. None of these may be wired.
+ * NOT registered (deliberately):
+ *   - staff_credentials_new / staff_credentials_reset — REJECTED by Meta
+ *   - hello_world — Meta's sample template, never a production notification
+ *   - school_notification — PENDING (not APPROVED); must not be used as a live
+ *     fallback (see WHATSAPP_FALLBACK_ENABLED in config/whatsapp.ts)
  */
 
 export type TemplateHeaderType = 'document' | 'image' | 'video';
@@ -36,6 +45,8 @@ export interface RegisteredTemplate {
   metaName: string;
   /** Exact Meta-approved language code for this template version. */
   language: string;
+  /** Meta category, for documentation/observability only. */
+  category: 'attendance' | 'fees' | 'reports' | 'announcements';
   /**
    * Ordered named body parameters, exactly as approved
    * (the template's parameter_format is NAMED — these are `parameter_name`s,
@@ -47,33 +58,43 @@ export interface RegisteredTemplate {
    * then supply header media (see queueTemplateNotification `headerDocument`).
    */
   header?: { type: TemplateHeaderType };
-  category: 'attendance' | 'fees' | 'reports' | 'announcements';
 }
 
 const ATTENDANCE_PARAMS = ['student_name_en', 'student_name_te'] as const;
+const INSTALLMENT_PARAMS = [
+  'installment_no_en',
+  'amount_en',
+  'student_name_en',
+  'due_date_en',
+  'installment_no_te',
+  'amount_te',
+  'student_name_te',
+  'due_date_te'
+] as const;
 
 export const WHATSAPP_TEMPLATES = {
   'attendance.full': {
     metaName: 'attendance_alert_full',
     language: 'en',
-    parameters: ATTENDANCE_PARAMS,
-    category: 'attendance'
+    category: 'attendance',
+    parameters: ATTENDANCE_PARAMS
   },
   'attendance.morning': {
     metaName: 'attendance_alert_morning',
     language: 'en',
-    parameters: ATTENDANCE_PARAMS,
-    category: 'attendance'
+    category: 'attendance',
+    parameters: ATTENDANCE_PARAMS
   },
   'attendance.afternoon': {
     metaName: 'attendance_alert_afternoon',
     language: 'en',
-    parameters: ATTENDANCE_PARAMS,
-    category: 'attendance'
+    category: 'attendance',
+    parameters: ATTENDANCE_PARAMS
   },
   'fee.receipt': {
     metaName: 'fee_receipt',
     language: 'en',
+    category: 'fees',
     parameters: [
       'amount_en',
       'fee_name_en',
@@ -86,15 +107,38 @@ export const WHATSAPP_TEMPLATES = {
       'receipt_number_te',
       'verification_url_te'
     ],
-    header: { type: 'document' },
-    category: 'fees'
+    header: { type: 'document' }
   },
   'report.card': {
     metaName: 'report_card_notice',
     language: 'en',
+    category: 'reports',
     parameters: ATTENDANCE_PARAMS, // student_name_en, student_name_te
-    header: { type: 'document' },
-    category: 'reports'
+    header: { type: 'document' }
+  },
+  'installment.reminder': {
+    metaName: 'installment_reminder',
+    language: 'en',
+    category: 'fees',
+    parameters: INSTALLMENT_PARAMS
+  },
+  'installment.overdue': {
+    metaName: 'installment_overdue',
+    language: 'en',
+    category: 'fees',
+    parameters: INSTALLMENT_PARAMS
+  },
+  'announcement.broadcast': {
+    metaName: 'announcement_broadcast',
+    language: 'en',
+    category: 'announcements',
+    parameters: ['custom']
+  },
+  'event.announcement': {
+    metaName: 'event_announcement',
+    language: 'en',
+    category: 'announcements',
+    parameters: ['event_title', 'event_date', 'event_description']
   }
 } as const satisfies Record<string, RegisteredTemplate>;
 

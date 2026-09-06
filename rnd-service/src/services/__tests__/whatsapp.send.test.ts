@@ -52,6 +52,7 @@ afterEach(() => {
   delete process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
   delete process.env.WHATSAPP_APP_SECRET;
   delete process.env.WHATSAPP_MAX_RETRIES;
+  delete process.env.WHATSAPP_FALLBACK_ENABLED;
   resetWhatsAppConfigCache();
   vi.restoreAllMocks();
 });
@@ -112,7 +113,19 @@ describe('sendWhatsAppText', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('falls back to the approved template when the 24h window is closed (131047)', async () => {
+  it('does NOT auto-fall-back to a template on 131047 by default (fallback disabled) — returns a permanent error', async () => {
+    fetchMock.mockResolvedValueOnce(errorResponse(400, 131047, 're-engagement required'));
+    const result = await sendWhatsAppTextDetailed('8899582239', 'window closed');
+    expect(result.success).toBe(false);
+    expect(result.usedFallbackTemplate).toBeUndefined();
+    expect(result.error?.code).toBe(131047);
+    expect(result.error?.retryable).toBe(false); // deterministic → worker must not retry
+    expect(fetchMock).toHaveBeenCalledTimes(1); // no second (fallback) call
+  });
+
+  it('falls back to the approved template on 131047 ONLY when WHATSAPP_FALLBACK_ENABLED=true', async () => {
+    process.env.WHATSAPP_FALLBACK_ENABLED = 'true';
+    resetWhatsAppConfigCache();
     fetchMock
       .mockResolvedValueOnce(errorResponse(400, 131047, 're-engagement required'))
       .mockResolvedValueOnce(okResponse('wamid.TPL'));
@@ -120,18 +133,23 @@ describe('sendWhatsAppText', () => {
     expect(result.success).toBe(true);
     expect(result.usedFallbackTemplate).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-
     const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body);
     expect(secondBody.type).toBe('template');
     expect(secondBody.template.name).toBe('school_notification');
     expect(secondBody.template.components[0].parameters[0].text).toBe('window closed');
+    delete process.env.WHATSAPP_FALLBACK_ENABLED;
+    resetWhatsAppConfigCache();
   }, 15000);
 
-  it('does not recurse if the fallback template itself hits 131047', async () => {
+  it('does not recurse if the enabled fallback template itself hits 131047', async () => {
+    process.env.WHATSAPP_FALLBACK_ENABLED = 'true';
+    resetWhatsAppConfigCache();
     fetchMock.mockResolvedValue(errorResponse(400, 131047, 're-engagement required'));
     const result = await sendWhatsAppTextDetailed('8899582239', 'double window');
     expect(result.success).toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(2); // original + one fallback, no infinite loop
+    delete process.env.WHATSAPP_FALLBACK_ENABLED;
+    resetWhatsAppConfigCache();
   });
 
   it('suppresses accidental duplicate sends inside the dedupe window', async () => {

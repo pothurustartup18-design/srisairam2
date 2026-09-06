@@ -2,7 +2,32 @@ import { Router, Request, Response } from 'express';
 import { Event } from '../../models/event.model';
 import { ScheduledAlert } from '../../models/scheduledAlert.model';
 import { SystemConfig } from '../../models/systemConfig.model';
-import { executeAlertBroadcast, BroadcastFilters } from '../../services/scheduler';
+import { executeAlertBroadcast, BroadcastFilters, BroadcastTemplate, formatTemplateDate } from '../../services/scheduler';
+
+/**
+ * Approved-template descriptor for an event/notice alert.
+ *  - a "notice" (type !== 'event')  → announcement_broadcast, param: custom
+ *  - an "event"                     → event_announcement, params: event_title / _date / _description
+ */
+function buildAlertTemplate(opts: {
+  type?: string;
+  title: string;
+  description?: string;
+  date?: string | Date;
+}): BroadcastTemplate {
+  const desc = (opts.description || '').trim();
+  if (opts.type === 'event') {
+    return {
+      key: 'event.announcement',
+      params: {
+        event_title: opts.title,
+        event_date: opts.date ? formatTemplateDate(opts.date) : formatTemplateDate(new Date()),
+        event_description: desc || opts.title
+      }
+    };
+  }
+  return { key: 'announcement.broadcast', params: { custom: desc || opts.title } };
+}
 import { requirePermission } from '../../middlewares/permission.middleware';
 import { audit } from '../../middlewares/audit.middleware';
 import { getS3Client, getPresignedDownloadUrl } from '../../services/s3.service';
@@ -30,6 +55,9 @@ router.post('/broadcast', requirePermission('events:manage'), audit('broadcast:s
     const filters: BroadcastFilters = { classes: classes || [], sections: sections || [] };
     const mediaList: string[] = Array.isArray(mediaUrls) ? mediaUrls : [];
 
+    // A /broadcast is always a plain announcement → announcement_broadcast template.
+    const alertTemplate = buildAlertTemplate({ type: 'notice', title: broadcastTitle, description: message });
+
     if (scheduledAlertTime) {
       const scheduledDate = new Date(scheduledAlertTime);
       if (isNaN(scheduledDate.getTime())) {
@@ -43,7 +71,9 @@ router.post('/broadcast', requirePermission('events:manage'), audit('broadcast:s
         mediaUrl: mediaList[0],
         mediaUrls: mediaList,
         classes: filters.classes,
-        sections: filters.sections
+        sections: filters.sections,
+        templateKey: alertTemplate.key,
+        templateParams: alertTemplate.params
       });
       return res.status(200).json({
         success: true,
@@ -51,7 +81,7 @@ router.post('/broadcast', requirePermission('events:manage'), audit('broadcast:s
       });
     }
 
-    await executeAlertBroadcast(broadcastTitle, message, audience, undefined, mediaList, filters);
+    await executeAlertBroadcast(broadcastTitle, message, audience, undefined, mediaList, filters, alertTemplate);
     return res.status(200).json({ success: true, message: 'Broadcast dispatched successfully.' });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });
@@ -82,10 +112,13 @@ router.post('/', requirePermission('events:manage'), async (req: Request, res: R
 
     // Handle publishing alerts if specified
     if (sendAlertsTo && sendAlertsTo !== 'none') {
+      // `alertMsg` is kept only for the ScheduledAlert / ERP history record —
+      // actual WhatsApp delivery uses the approved template below.
       const alertMsg = `SchoolHub Event: "${title}" is scheduled on ${new Date(date).toLocaleDateString()}. Description: ${description || ''}`;
       const mediaList: string[] = Array.isArray(media) ? media : (media ? [media] : []);
       const audience = sendAlertsTo as 'parents' | 'teachers' | 'both';
       const filters = { classes: classes || [], sections: sections || [] };
+      const alertTemplate = buildAlertTemplate({ type, title, description, date });
 
       if (scheduledAlertTime) {
         // --- SCHEDULED ALERT ---
@@ -100,12 +133,14 @@ router.post('/', requirePermission('events:manage'), async (req: Request, res: R
           mediaUrls: mediaList,
           classes: filters.classes,
           sections: filters.sections,
-          eventId: createdEvent._id
+          eventId: createdEvent._id,
+          templateKey: alertTemplate.key,
+          templateParams: alertTemplate.params
         });
         console.log(`[Scheduler] Alert successfully scheduled for ${scheduledDate.toISOString()}`);
       } else {
         // --- IMMEDIATE ALERT ---
-        await executeAlertBroadcast(title, alertMsg, audience, undefined, mediaList, filters);
+        await executeAlertBroadcast(title, alertMsg, audience, undefined, mediaList, filters, alertTemplate);
       }
     }
 

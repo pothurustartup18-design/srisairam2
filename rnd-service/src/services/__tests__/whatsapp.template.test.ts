@@ -262,3 +262,65 @@ describe('sendWhatsAppTemplate — DOCUMENT header (fee_receipt / report_card_no
     );
   });
 });
+
+describe('sendWhatsAppTemplate — installment / announcement / event (BODY-only, NAMED)', () => {
+  const INSTALLMENT = {
+    installment_no_en: '2', amount_en: '2,500', student_name_en: 'Aarav Patel', due_date_en: '10 September 2026',
+    installment_no_te: '2', amount_te: '2,500', student_name_te: 'Aarav Patel', due_date_te: '10 September 2026'
+  };
+
+  it.each(['installment_reminder', 'installment_overdue'])('%s → 8 named body params, no header', async (metaName) => {
+    fetchMock.mockResolvedValueOnce(okResponse('wamid.INST'));
+    const result = await sendWhatsAppTemplate('8899582239', metaName, 'en', INSTALLMENT);
+    expect(result.success).toBe(true);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.type).toBe('template');
+    expect(body.template.name).toBe(metaName);
+    expect(body.template.language).toEqual({ code: 'en' });
+    expect(body.template.components).toHaveLength(1); // body only, no header
+    expect(body.template.components[0].type).toBe('body');
+    expect(body.template.components[0].parameters).toHaveLength(8);
+    expect(body.template.components[0].parameters.every((p: any) => typeof p.parameter_name === 'string')).toBe(true);
+    expect(body.template.components[0].parameters.map((p: any) => p.parameter_name).sort()).toEqual(
+      Object.keys(INSTALLMENT).sort()
+    );
+  });
+
+  it('announcement_broadcast → single named param "custom"', async () => {
+    fetchMock.mockResolvedValueOnce(okResponse('wamid.ANN'));
+    await sendWhatsAppTemplate('8899582239', 'announcement_broadcast', 'en', { custom: 'School closed tomorrow.' });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.template.name).toBe('announcement_broadcast');
+    expect(body.template.components[0].parameters).toEqual([
+      { type: 'text', parameter_name: 'custom', text: 'School closed tomorrow.' }
+    ]);
+  });
+
+  it('event_announcement → event_title / event_date / event_description', async () => {
+    fetchMock.mockResolvedValueOnce(okResponse('wamid.EVT'));
+    await sendWhatsAppTemplate('8899582239', 'event_announcement', 'en', {
+      event_title: 'Sports Day', event_date: '20 September 2026', event_description: 'Annual sports day.'
+    });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.template.name).toBe('event_announcement');
+    expect(body.template.components[0].parameters).toEqual([
+      { type: 'text', parameter_name: 'event_title', text: 'Sports Day' },
+      { type: 'text', parameter_name: 'event_date', text: '20 September 2026' },
+      { type: 'text', parameter_name: 'event_description', text: 'Annual sports day.' }
+    ]);
+  });
+
+  it('classifies a Meta template-not-approved (132001) as a PERMANENT (non-retryable) error', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({ error: { message: 'template does not exist', type: 'OAuthException', code: 132001 } }),
+        { status: 400 }
+      )
+    );
+    const result = await sendWhatsAppTemplate('8899582239', 'installment_reminder', 'en', INSTALLMENT);
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe(132001);
+    expect(result.error?.retryable).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // not retried in-process
+  });
+});

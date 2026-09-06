@@ -154,3 +154,115 @@ describe('attendance templates carry no header', () => {
     }
   });
 });
+
+const INSTALLMENT = {
+  installment_no_en: '1', amount_en: '2,500', student_name_en: 'Harsha', due_date_en: '10 September 2026',
+  installment_no_te: '1', amount_te: '2,500', student_name_te: 'Harsha', due_date_te: '10 September 2026'
+};
+
+describe('installment templates', () => {
+  it('installment.reminder → installment_reminder / en / 8 named params / no header', () => {
+    const def = getRegisteredTemplate('installment.reminder')!;
+    expect(def.metaName).toBe('installment_reminder');
+    expect(def.language).toBe('en');
+    expect(def.header).toBeUndefined();
+    expect(def.parameters).toEqual([
+      'installment_no_en', 'amount_en', 'student_name_en', 'due_date_en',
+      'installment_no_te', 'amount_te', 'student_name_te', 'due_date_te'
+    ]);
+  });
+
+  it('installment.overdue → installment_overdue / en / same 8 params', () => {
+    const def = getRegisteredTemplate('installment.overdue')!;
+    expect(def.metaName).toBe('installment_overdue');
+    expect(def.parameters).toEqual(getRegisteredTemplate('installment.reminder')!.parameters);
+  });
+
+  it('resolves with all 8 params', () => {
+    for (const key of ['installment.reminder', 'installment.overdue'] as const) {
+      const res = resolveTemplateMessage(key, INSTALLMENT);
+      expect(res.ok).toBe(true);
+      if (!res.ok) return;
+      expect(Object.keys(res.message.named)).toHaveLength(8);
+      expect(res.message.named.due_date_te).toBe('10 September 2026');
+    }
+  });
+
+  it('rejects when an installment param is missing', () => {
+    const { due_date_te, ...rest } = INSTALLMENT;
+    const res = resolveTemplateMessage('installment.reminder', rest);
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toMatch(/due_date_te/);
+  });
+});
+
+describe('announcement + event templates (MARKETING, text-only)', () => {
+  it('announcement.broadcast → announcement_broadcast / en / param: custom', () => {
+    const def = getRegisteredTemplate('announcement.broadcast')!;
+    expect(def.metaName).toBe('announcement_broadcast');
+    expect(def.language).toBe('en');
+    expect(def.header).toBeUndefined();
+    expect(def.parameters).toEqual(['custom']);
+  });
+
+  it('event.announcement → event_announcement / en / params: event_title, event_date, event_description', () => {
+    const def = getRegisteredTemplate('event.announcement')!;
+    expect(def.metaName).toBe('event_announcement');
+    expect(def.parameters).toEqual(['event_title', 'event_date', 'event_description']);
+    expect(def.header).toBeUndefined();
+  });
+
+  it('resolves announcement.broadcast with { custom }', () => {
+    const res = resolveTemplateMessage('announcement.broadcast', { custom: 'School closed tomorrow.' });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.message.metaName).toBe('announcement_broadcast');
+    expect(res.message.named).toEqual({ custom: 'School closed tomorrow.' });
+  });
+
+  it('resolves event.announcement with the 3 event params', () => {
+    const res = resolveTemplateMessage('event.announcement', {
+      event_title: 'Sports Day', event_date: '20 September 2026', event_description: 'Annual sports day.'
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.message.named).toEqual({
+      event_title: 'Sports Day', event_date: '20 September 2026', event_description: 'Annual sports day.'
+    });
+  });
+
+  it('rejects announcement.broadcast with a stray param', () => {
+    const res = resolveTemplateMessage('announcement.broadcast', { custom: 'hi', title: 'x' });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toMatch(/unexpected parameter\(s\): title/);
+  });
+});
+
+describe('registry completeness — every active production template is registered', () => {
+  it('has exactly the 9 expected keys → exact Meta names', () => {
+    const expected: Record<string, string> = {
+      'attendance.full': 'attendance_alert_full',
+      'attendance.morning': 'attendance_alert_morning',
+      'attendance.afternoon': 'attendance_alert_afternoon',
+      'fee.receipt': 'fee_receipt',
+      'report.card': 'report_card_notice',
+      'installment.reminder': 'installment_reminder',
+      'installment.overdue': 'installment_overdue',
+      'announcement.broadcast': 'announcement_broadcast',
+      'event.announcement': 'event_announcement'
+    };
+    expect(Object.keys(WHATSAPP_TEMPLATES).sort()).toEqual(Object.keys(expected).sort());
+    for (const [k, meta] of Object.entries(expected)) {
+      expect(getRegisteredTemplate(k)!.metaName).toBe(meta);
+      expect(getRegisteredTemplate(k)!.language).toBe('en');
+    }
+  });
+
+  it('never registers a rejected / test / pending template', () => {
+    const banned = ['staff_credentials_new', 'staff_credentials_reset', 'hello_world', 'school_notification'];
+    const registered = Object.values(WHATSAPP_TEMPLATES).map((t) => t.metaName);
+    for (const b of banned) expect(registered).not.toContain(b);
+  });
+});

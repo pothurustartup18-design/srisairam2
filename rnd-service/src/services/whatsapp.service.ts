@@ -479,8 +479,11 @@ async function dispatch(args: DispatchArgs): Promise<WhatsAppSendResult> {
     const classified = classifySendError(response?.status, body, networkError);
     lastError = classified;
 
-    // 24h window closed → resend as approved template (once, never recursive)
-    if (classified.code === REENGAGEMENT_ERROR_CODE && !args._isFallback) {
+    // 24h window closed → resend as approved fallback template (once, never
+    // recursive). Only when explicitly enabled AND the send is not itself the
+    // fallback: the default fallback template (school_notification) is PENDING,
+    // so without an APPROVED one this would only produce a second failure.
+    if (classified.code === REENGAGEMENT_ERROR_CODE && !args._isFallback && config.fallbackEnabled) {
       logWa('warn', 'session_window_closed', { schoolId, to, messageType: args.messageType });
       await safeUpdateRecord(record, () => {
         record!.status = 'failed';

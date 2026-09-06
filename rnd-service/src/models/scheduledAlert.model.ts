@@ -13,6 +13,13 @@ export interface IScheduledAlert extends Document {
   classes?: string[];
   sections?: string[];
   studentIds?: string[];
+  /**
+   * When set, the scheduler delivers this alert as an approved Meta template
+   * (announcement.broadcast / event.announcement) via queueTemplateNotification
+   * instead of a free-form message. `message` is kept for the ERP UI / history.
+   */
+  templateKey?: string;
+  templateParams?: Record<string, string>;
 }
 
 const ScheduledAlertSchema = new Schema<IScheduledAlert>(
@@ -27,7 +34,9 @@ const ScheduledAlertSchema = new Schema<IScheduledAlert>(
     eventId: { type: String },
     classes: [{ type: String }],
     sections: [{ type: String }],
-    studentIds: [{ type: String }]
+    studentIds: [{ type: String }],
+    templateKey: { type: String },
+    templateParams: { type: Schema.Types.Mixed }
   },
   { timestamps: true }
 );

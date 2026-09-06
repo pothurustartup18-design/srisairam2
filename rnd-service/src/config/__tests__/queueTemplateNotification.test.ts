@@ -178,3 +178,74 @@ describe('queueTemplateNotification — document-header templates', () => {
     );
   });
 });
+
+const INSTALLMENT = {
+  installment_no_en: '2', amount_en: '2,500', student_name_en: 'Aarav Patel', due_date_en: '10 September 2026',
+  installment_no_te: '2', amount_te: '2,500', student_name_te: 'Aarav Patel', due_date_te: '10 September 2026'
+};
+
+describe('queueTemplateNotification — installment templates (no header, 8 params)', () => {
+  it('enqueues installment.reminder → installment_reminder with all 8 named params', async () => {
+    const res = await queueTemplateNotification('installment.reminder', {
+      to: '8899582239',
+      params: INSTALLMENT,
+      dedupeKey: 'installment.reminder:stu1:2:2026-09-10:2026-09-06'
+    });
+    expect(res).toEqual({ queued: true });
+    const [jobName, jobData] = addMock.mock.calls[0];
+    expect(jobName).toBe('sendWhatsAppTemplate');
+    expect(jobData.templateName).toBe('installment_reminder');
+    expect(jobData.languageCode).toBe('en');
+    expect(jobData.header).toBeUndefined();
+    expect(Object.keys(jobData.named).sort()).toEqual(Object.keys(INSTALLMENT).sort());
+  });
+
+  it('enqueues installment.overdue → installment_overdue', async () => {
+    await queueTemplateNotification('installment.overdue', { to: '8899582239', params: INSTALLMENT });
+    expect(addMock.mock.calls[0][1].templateName).toBe('installment_overdue');
+  });
+
+  it('rejects installment.reminder with a missing param (nothing queued)', async () => {
+    const { due_date_te, ...rest } = INSTALLMENT;
+    const res = await queueTemplateNotification('installment.reminder', { to: '8899582239', params: rest });
+    expect(res.queued).toBe(false);
+    expect(res.reason).toMatch(/due_date_te/);
+    expect(addMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('queueTemplateNotification — announcement + event templates', () => {
+  it('enqueues announcement.broadcast → announcement_broadcast { custom }', async () => {
+    const res = await queueTemplateNotification('announcement.broadcast', {
+      to: '8899582239',
+      params: { custom: 'School reopens Monday.' },
+      dedupeKey: 'announcement.broadcast:abc123:918899582239'
+    });
+    expect(res).toEqual({ queued: true });
+    const [, jobData] = addMock.mock.calls[0];
+    expect(jobData.templateName).toBe('announcement_broadcast');
+    expect(jobData.named).toEqual({ custom: 'School reopens Monday.' });
+    expect(jobData.header).toBeUndefined();
+  });
+
+  it('enqueues event.announcement → event_announcement with 3 params', async () => {
+    const res = await queueTemplateNotification('event.announcement', {
+      to: '8899582239',
+      params: { event_title: 'Sports Day', event_date: '20 September 2026', event_description: 'Annual sports day.' },
+      dedupeKey: 'event.announcement:evt1:918899582239'
+    });
+    expect(res).toEqual({ queued: true });
+    const [, jobData] = addMock.mock.calls[0];
+    expect(jobData.templateName).toBe('event_announcement');
+    expect(jobData.named).toEqual({
+      event_title: 'Sports Day', event_date: '20 September 2026', event_description: 'Annual sports day.'
+    });
+  });
+
+  it('rejects announcement.broadcast with an empty custom param', async () => {
+    const res = await queueTemplateNotification('announcement.broadcast', { to: '8899582239', params: { custom: '   ' } });
+    expect(res.queued).toBe(false);
+    expect(res.reason).toMatch(/custom/);
+    expect(addMock).not.toHaveBeenCalled();
+  });
+});
