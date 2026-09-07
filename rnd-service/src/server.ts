@@ -34,6 +34,7 @@ import adminTeacherRoutes from './routes/admin/teacher.routes';
 import adminStudentRoutes from './routes/admin/student.routes';
 import adminDashboardRoutes from './routes/admin/dashboard.routes';
 import adminEventRoutes from './routes/admin/event.routes';
+import eventPublicRoutes from './routes/shared/eventPublic.routes';
 import adminLeaveRoutes from './routes/admin/leave.routes';
 import adminFeedbackRoutes from './routes/admin/feedback.routes';
 import adminSettingsRoutes from './routes/admin/settings';
@@ -134,6 +135,11 @@ app.use('/api/school-profile', schoolProfileRoutes);
 // Mixed public/private router (like schoolProfileRoutes): /verify is public,
 // the main aggregation route guards itself inline via authenticateJWT.
 app.use('/api/report-card', reportCardRoutes);
+
+// PUBLIC: the permanent Event Announcement gallery link (destination of the
+// WhatsApp media_url). Only handles GET /api/events/:eventId/media — every other
+// /api/events/* route falls through to the authenticateJWT-gated router below.
+app.use('/api/events', eventPublicRoutes);
 
 // Protected API Routes (All routes below require JWT validation)
 app.use('/api/teachers', authenticateJWT, adminTeacherRoutes);

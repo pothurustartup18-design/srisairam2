@@ -35,14 +35,33 @@ function renderItem(file: GalleryFile): string {
   return `<div class="item">${media}<div class="item-footer"><div class="filename">${safeName}</div>${downloadBtn}</div></div>`;
 }
 
-function buildGalleryHtml(files: GalleryFile[]): string {
-  const itemsHtml = files.map(renderItem).join('\n');
+export interface GalleryPageOptions {
+  /** <title> text. */
+  title?: string;
+  /** Heading text; defaults to "📎 Shared Files (N)". */
+  heading?: string;
+  /** Shown when there are zero files (instead of a broken/empty page). */
+  emptyMessage?: string;
+}
+
+/**
+ * Renders a self-contained gallery HTML page (no external assets, no scripts).
+ * Pure function — same input → same output — so it is safe to call on every
+ * request. Empty `files` renders a friendly empty state.
+ */
+export function renderGalleryPage(files: GalleryFile[], opts: GalleryPageOptions = {}): string {
+  const title = escapeHtml(opts.title || 'Shared Files');
+  const heading = escapeHtml(opts.heading || `📎 Shared Files (${files.length})`);
+  const inner =
+    files.length === 0
+      ? `<div class="empty">${escapeHtml(opts.emptyMessage || 'No files are currently available.')}</div>`
+      : files.map(renderItem).join('\n');
   return `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Shared Files</title>
+<title>${title}</title>
 <style>
   body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background:#f1f5f9; margin:0; padding:16px; color:#0f172a; }
   h1 { font-size:18px; margin:0 0 16px; }
@@ -54,13 +73,18 @@ function buildGalleryHtml(files: GalleryFile[]): string {
   .download-btn { display:inline-flex; align-items:center; gap:4px; color:#ffffff; background:#4f46e5; text-decoration:none; font-weight:600; font-size:13px; padding:6px 12px; border-radius:6px; transition: background 0.2s; cursor: pointer; }
   .download-btn:hover { background:#3730a3; }
   .doc-link { display:inline-flex; align-items:center; gap:8px; color:#4f46e5; text-decoration:none; font-weight:600; font-size:15px; }
+  .empty { background:#ffffff; border-radius:10px; padding:32px 16px; text-align:center; color:#64748b; font-size:14px; font-weight:500; box-shadow:0 1px 2px rgba(0,0,0,0.08); }
 </style>
 </head>
 <body>
-<h1>📎 Shared Files (${files.length})</h1>
-${itemsHtml}
+<h1>${heading}</h1>
+${inner}
 </body>
 </html>`;
+}
+
+function buildGalleryHtml(files: GalleryFile[]): string {
+  return renderGalleryPage(files);
 }
 
 /**

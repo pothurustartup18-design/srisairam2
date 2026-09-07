@@ -14,7 +14,7 @@ vi.mock('../s3.service', async () => {
   };
 });
 
-import { uploadGallery } from '../mediaGallery.service';
+import { uploadGallery, renderGalleryPage } from '../mediaGallery.service';
 
 beforeEach(() => {
   sendMock.mockClear();
@@ -53,5 +53,33 @@ describe('uploadGallery', () => {
     expect(html).toContain('download="&lt;script&gt;evil&lt;/script&gt;.pdf"');
     expect(html).not.toContain('<script>evil</script>');
     expect(html).toContain('Shared Files (4)');
+  });
+});
+
+describe('renderGalleryPage', () => {
+  it('default output is byte-identical to the legacy gallery HTML (DM path unchanged)', () => {
+    const files = [{ url: 'https://x.test/a.jpg', type: 'image' as const, filename: 'a.jpg' }];
+    const html = renderGalleryPage(files);
+    expect(html).toContain('<title>Shared Files</title>');
+    expect(html).toContain('📎 Shared Files (1)');
+    expect(html).toContain('<img src="https://x.test/a.jpg"');
+  });
+
+  it('supports a custom title/heading and escapes them', () => {
+    const html = renderGalleryPage([{ url: 'https://x.test/a.jpg', type: 'image', filename: 'a.jpg' }], {
+      title: 'Attachments — Sports <Day>',
+      heading: '📎 Sports <Day> & "Fun"'
+    });
+    expect(html).toContain('<title>Attachments — Sports &lt;Day&gt;</title>');
+    expect(html).toContain('📎 Sports &lt;Day&gt; &amp; &quot;Fun&quot;');
+    expect(html).not.toContain('<Day>');
+  });
+
+  it('renders a friendly empty state when there are no files (no broken page)', () => {
+    const html = renderGalleryPage([], { title: 'Attachments — X', emptyMessage: 'No attachments are currently available for this event.' });
+    expect(html).toContain('class="empty"');
+    expect(html).toContain('No attachments are currently available for this event.');
+    expect(html).not.toContain('<img');
+    expect(html).not.toContain('<video');
   });
 });
