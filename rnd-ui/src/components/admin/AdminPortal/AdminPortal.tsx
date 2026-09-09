@@ -656,28 +656,23 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
   };
 
   // â”€â”€â”€ Send Reminder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const handleSendReminder = async (studentId: string, feeType: 'school' | 'books') => {
-    const s = students.find(x => x.id === studentId || x._id === studentId);
-    if (!s) return;
-
-    let message = '';
-    if (feeType === 'school') {
-      message = `Dear Parent, this is a reminder regarding the outstanding school fees of â‚¹${s.feePending} for your ward ${s.name}. Please clear the dues at your earliest convenience.`;
-    } else {
-      message = `Dear Parent, this is a reminder regarding the outstanding books fees of â‚¹${s.booksFee || 0} for your ward ${s.name}. Please clear the dues at your earliest convenience.`;
-    }
-
+  const handleSendReminder = async (
+    studentId: string,
+    feeCategory: 'school' | 'books' | 'transport' | 'all' = 'all'
+  ) => {
     try {
       const token = getAccessToken();
       const headers: HeadersInit = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
+      // The backend runs the shared fee calculation and queues the approved
+      // fee_general_reminder template — no free-form message from the client.
       const res = await fetch(`${API_BASE}/dashboard/send-reminder`, {
         method: 'POST', headers,
-        body: JSON.stringify({ studentId, message }),
+        body: JSON.stringify({ studentId, feeCategory }),
       });
       const data = await res.json();
-      showToast(data.success ? data.message : (data.message || 'Failed to send reminder.'), data.success ? 'success' : 'error');
+      showToast(data.message || (data.success ? 'Fee reminder sent on WhatsApp.' : 'Failed to send reminder.'), data.success ? 'success' : 'error');
     } catch (err: any) {
       showToast(err.message || 'Failed to send reminder.', 'error');
     }
@@ -1325,7 +1320,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                   events={events}
                   onNavigate={(v) => setActiveView(v as AdminView)}
                   onAdmitStudent={() => setActiveView('students')}
-                  onSendReminder={(student, feeCategory) => handleSendReminder(student.id || student._id || '', feeCategory || 'school')}
+                  onSendReminder={(student, feeCategory) => handleSendReminder(student.id || student._id || '', feeCategory || 'all')}
                   onDeleteStudent={(student) => setDeleteTarget({ type: 'student', data: student })}
                   onMessageParent={(student) => setMessageTarget(student)}
                   showToast={showToast}
@@ -1346,7 +1341,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                   filteredStudents={filteredStudents}
                   students={students}
                   classesList={classesList}
-                  onSendReminder={(student, feeCategory) => handleSendReminder(student.id || student._id || '', feeCategory || 'school')}
+                  onSendReminder={(student, feeCategory) => handleSendReminder(student.id || student._id || '', feeCategory || 'all')}
                   onDeleteStudent={(student) => setDeleteTarget({ type: 'student', data: student })}
                   onMessageParent={(student) => setMessageTarget(student)}
                   showToast={showToast}

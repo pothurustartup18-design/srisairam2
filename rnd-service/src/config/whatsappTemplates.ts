@@ -18,10 +18,23 @@
  *                    receipt_number_te, verification_url_te
  *   report_card_notice           en  APPROVED  UTILITY    NAMED  HEADER=DOCUMENT + BODY
  *       body params: student_name_en, student_name_te
- *   installment_reminder         en  APPROVED  UTILITY    NAMED  BODY only
  *   installment_overdue          en  APPROVED  UTILITY    NAMED  BODY only
  *       body params: installment_no_en, amount_en, student_name_en, due_date_en,
  *                    installment_no_te, amount_te, student_name_te, due_date_te
+ *   installment_reminder         en  APPROVED  UTILITY    NAMED  BODY only
+ *       LIVE body params (verified against Meta 2026-09-09):
+ *         student_name_en, fee_type_en, amount_en,
+ *         student_name_te, fee_type_te, amount_te
+ *       The approved body is a bilingual GENERAL fee/dues reminder
+ *       ("Fee Reminder … Fee Type: {{fee_type_en}} … Pending Amount: ₹{{amount_en}}").
+ *       Registered TWICE, on purpose:
+ *         - key 'fee.general_reminder' → the LIVE 6-param structure (used by the
+ *           Admin → Reminders/Fee "🚀" button + bulk + scheduled fee reminders;
+ *           fee_type = School Fee / Bus Fee / Books Fee / Total Outstanding Fees).
+ *         - key 'installment.reminder' → the OLD 8-param installment structure,
+ *           still referenced by runInstallmentReminderSweep. NOTE: the approved
+ *           template no longer matches those 8 params — that sweep path predates
+ *           the template edit and is out of scope here.
  *   announcement_broadcast       en  APPROVED  MARKETING  NAMED  BODY only
  *       body params: custom
  *   event_announcement           en  APPROVED  MARKETING  NAMED  BODY only
@@ -128,6 +141,27 @@ export const WHATSAPP_TEMPLATES = {
     category: 'fees',
     parameters: INSTALLMENT_PARAMS
   },
+  'fee.general_reminder': {
+    // The approved `installment_reminder` template is (as of 2026-09-09) a
+    // bilingual GENERAL fee reminder — NAMED params student_name / fee_type /
+    // amount, no installment number, no due date. Used "as is" for the
+    // individual "🚀" + bulk + scheduled fee reminders.
+    metaName: 'installment_reminder',
+    language: 'en',
+    category: 'fees',
+    // _te values mirror _en for student_name and amount (only the sentence
+    // wrapper differs in the approved template); fee_type_en / fee_type_te are
+    // the localized labels for the admin's selection (School Fee / Bus Fee /
+    // Books Fee / Total Outstanding Fees).
+    parameters: [
+      'student_name_en',
+      'fee_type_en',
+      'amount_en',
+      'student_name_te',
+      'fee_type_te',
+      'amount_te'
+    ]
+  },
   'announcement.broadcast': {
     metaName: 'announcement_broadcast',
     language: 'en',
@@ -157,10 +191,6 @@ export function getRegisteredTemplate(key: string): RegisteredTemplate | undefin
  * `blockedNotice(key)` returns the standard "not sent" payload for a route.
  */
 export const MISSING_TEMPLATES = {
-  'fee.general_reminder':
-    'General fee/dues reminder (school / books / transport totals — no installment number or due date). ' +
-    'Needs an approved UTILITY template, e.g. fee_due_reminder with named params ' +
-    'amount_en/te, fee_name_en/te, student_name_en/te. (Installment-specific dues already use installment_reminder / installment_overdue.)',
   'transport.alert':
     'Transport / "school bus approaching" cluster alert. Needs an approved UTILITY template, ' +
     'e.g. transport_bus_alert (fixed text) or transport_alert with a single {custom} param.',

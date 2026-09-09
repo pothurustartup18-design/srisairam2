@@ -16,6 +16,7 @@ import { blockedNotice } from '../../config/whatsappTemplates';
 import { runInstallmentReminderSweep } from '../../services/scheduler';
 import { ScheduledAlert } from '../../models/scheduledAlert.model';
 import { queueTemplateNotification } from '../../config/queue';
+import { dispatchFeeReminders, normalizeFeeCategory, FEE_TYPE_LABELS } from '../../services/feeReminder.service';
 
 import { User } from '../../models/user.model';
 
@@ -220,69 +221,41 @@ router.get('/students', cacheResponse(300), async (req: Request, res: Response) 
   }
 });
 
-// Send WhatsApp reminder for pending fee
+// Send a general fee/dues reminder now — the small "🚀" button (one studentId)
+// AND "Bulk Send → Send Immediately" (studentIds[]). ONE common flow: per student
+// the dues for `feeCategory` are resolved and ONE approved `fee_general_reminder`
+// template is queued ('all' → total outstanding, fee_type = "Total Outstanding Fees").
 router.post('/send-reminder', requirePermission('fees:view'), async (req: Request, res: Response) => {
   try {
-    const { studentId, message: customMessage, feeCategory } = req.body;
+    const { studentId, studentIds, feeCategory } = req.body;
 
-    if (!studentId) {
-      return res.status(400).json({ success: false, message: 'Student ID is required.' });
+    const ids: string[] = Array.isArray(studentIds)
+      ? studentIds.map((x: any) => String(x)).filter(Boolean)
+      : studentId
+      ? [String(studentId)]
+      : [];
+
+    if (ids.length === 0) {
+      return res.status(400).json({ success: false, message: 'studentId or studentIds is required.' });
     }
 
-    let recipient = '';
-    let studentName = '';
-    let pendingAmount = 0;
-    let booksFee = 0;
-    let transportFee = 0;
-    let preferredLanguage: 'en' | 'te' | 'hi' | undefined;
+    const category = normalizeFeeCategory(feeCategory);
+    const summary = await dispatchFeeReminders(ids, category);
+    const feeLabel = FEE_TYPE_LABELS[category].en;
 
-    const student = await Student.findById(studentId).populate('classTeacher', 'name');
-    if (!student) {
-      return res.status(404).json({ success: false, message: 'Student not found.' });
-    }
-    recipient = student.whatsappNo;
-    studentName = `${student.firstName} ${student.lastName}`;
-    pendingAmount = student.feePending || 0;
-    booksFee = (student as any).booksFee || 0;
-    transportFee = (student as any).transportFee || 0;
-    preferredLanguage = student.preferredLanguage;
-
-    let amountToRemind = 0;
-    let feeNameEn = 'fees';
-    if (feeCategory === 'school') {
-      amountToRemind = pendingAmount;
-      feeNameEn = 'school fees';
-    } else if (feeCategory === 'books') {
-      amountToRemind = booksFee;
-      feeNameEn = 'books fees';
-    } else if (feeCategory === 'transport') {
-      amountToRemind = transportFee;
-      feeNameEn = 'transport fees';
+    let message: string;
+    if (summary.queued > 0) {
+      message =
+        ids.length === 1
+          ? `${feeLabel} reminder sent on WhatsApp.`
+          : `${feeLabel} reminders sent to ${summary.queued} parent(s).`;
+    } else if (summary.skippedNoDues === summary.requested) {
+      message = `No reminder sent — no pending ${feeLabel.toLowerCase()} for the selected student(s).`;
     } else {
-      amountToRemind = pendingAmount + booksFee + transportFee;
+      message = `No reminders sent (${summary.skippedNoPhone} without a WhatsApp number, ${summary.rejected} rejected).`;
     }
 
-    if (amountToRemind <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: `Student ${studentName} has no pending ${feeNameEn}. No reminder sent.`,
-      });
-    }
-
-    // A GENERAL fee/dues reminder has no installment number or due date, so it
-    // cannot use installment_reminder / installment_overdue, and there is no
-    // other approved Meta template for it. Proactive free-form WhatsApp is
-    // disabled — do NOT send, do NOT report success. (Installment dues have their
-    // own path: "Run Installment Reminders" → installment_reminder / _overdue.)
-    void customMessage;
-    void preferredLanguage;
-    console.warn(
-      `[BLOCKED] /send-reminder: general fee reminder for ${studentName} (${recipient}) NOT sent — no approved WhatsApp template.`
-    );
-    return res.status(422).json({
-      ...blockedNotice('fee.general_reminder'),
-      details: { to: recipient, studentName, pendingAmount: amountToRemind, feeCategory: feeCategory || 'all' }
-    });
+    return res.status(200).json({ success: summary.queued > 0, message, feeCategory: category, ...summary });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });
   }
@@ -299,13 +272,50 @@ router.get('/scheduled-reminders', requirePermission('fees:view'), async (req: R
 });
 
 // POST /dashboard/schedule-reminders
-router.post('/schedule-reminders', requirePermission('fees:collect'), audit('fees:schedule-reminders'), async (_req: Request, res: Response) => {
-  // A "Scheduled Fee Reminder" is a general fee/dues reminder — no approved Meta
-  // template exists for it, and proactive free-form WhatsApp is disabled, so we
-  // no longer schedule these (they would never actually deliver). Installment
-  // dues are handled by the daily sweep / "Run Installment Reminders".
-  console.warn('[BLOCKED] /schedule-reminders: general fee reminder scheduling disabled — no approved WhatsApp template.');
-  return res.status(422).json(blockedNotice('fee.general_reminder'));
+// "Bulk Send → Schedule for Later": store one pending ScheduledAlert per requested
+// time. At fire time the scheduler runs the SAME fee calculation + approved
+// `fee_general_reminder` template path as the immediate send (see feeReminder.service).
+router.post('/schedule-reminders', requirePermission('fees:collect'), audit('fees:schedule-reminders'), async (req: Request, res: Response) => {
+  try {
+    const { studentIds, scheduledTimes, feeCategory } = req.body;
+
+    const ids: string[] = Array.isArray(studentIds) ? studentIds.map((x: any) => String(x)).filter(Boolean) : [];
+    const times: string[] = Array.isArray(scheduledTimes) ? scheduledTimes.filter(Boolean) : [];
+
+    if (ids.length === 0) {
+      return res.status(400).json({ success: false, message: 'studentIds is required.' });
+    }
+    if (times.length === 0) {
+      return res.status(400).json({ success: false, message: 'At least one scheduledTime is required.' });
+    }
+
+    const category = normalizeFeeCategory(feeCategory);
+    const feeLabel = FEE_TYPE_LABELS[category].en;
+
+    const docs = times.map((t) => ({
+      title: 'Scheduled Fee Reminder',
+      message: `${feeLabel} reminder for ${ids.length} student(s).`,
+      sendAlertsTo: 'parents' as const,
+      scheduledAt: new Date(t),
+      status: 'pending' as const,
+      studentIds: ids,
+      kind: 'feeReminder' as const,
+      feeCategory: category
+    }));
+
+    if (docs.some((d) => isNaN(d.scheduledAt.getTime()))) {
+      return res.status(400).json({ success: false, message: 'One or more scheduledTime values are invalid.' });
+    }
+
+    const created = await ScheduledAlert.insertMany(docs);
+    return res.status(200).json({
+      success: true,
+      count: created.length,
+      message: `Scheduled ${created.length} ${feeLabel} reminder run(s) for ${ids.length} student(s).`
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 // DELETE /dashboard/scheduled-reminders/:id

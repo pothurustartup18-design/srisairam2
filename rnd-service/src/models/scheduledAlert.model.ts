@@ -20,6 +20,14 @@ export interface IScheduledAlert extends Document {
    */
   templateKey?: string;
   templateParams?: Record<string, string>;
+  /**
+   * 'feeReminder' → a scheduled general fee/dues reminder ("Bulk Send → Schedule
+   * for Later"). The scheduler resolves each student's dues at fire time and
+   * sends the approved `fee_general_reminder` template (see feeReminder.service).
+   * `feeCategory` is the admin's fee selection; 'all' = total outstanding.
+   */
+  kind?: 'feeReminder';
+  feeCategory?: 'school' | 'transport' | 'books' | 'all';
 }
 
 const ScheduledAlertSchema = new Schema<IScheduledAlert>(
@@ -36,7 +44,9 @@ const ScheduledAlertSchema = new Schema<IScheduledAlert>(
     sections: [{ type: String }],
     studentIds: [{ type: String }],
     templateKey: { type: String },
-    templateParams: { type: Schema.Types.Mixed }
+    templateParams: { type: Schema.Types.Mixed },
+    kind: { type: String, enum: ['feeReminder'] },
+    feeCategory: { type: String, enum: ['school', 'transport', 'books', 'all'] }
   },
   { timestamps: true }
 );

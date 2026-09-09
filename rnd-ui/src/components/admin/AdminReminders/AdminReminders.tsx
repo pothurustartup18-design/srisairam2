@@ -7,6 +7,16 @@ import { API_BASE, sortClasses } from '../../../constants';
 import { getAccessToken } from '../../../services/api';
 import { DataTable, MobileCardList, MobileRowCard, EmptyState } from '../../ui';
 
+// Fee selection for the "🚀" WhatsApp reminder — wired to the approved
+// `fee_general_reminder` Meta template. 'all' → total outstanding across all heads.
+type FeeCategory = 'school' | 'transport' | 'books' | 'all';
+const FEE_CATEGORY_OPTIONS: { value: FeeCategory; label: string }[] = [
+  { value: 'school', label: 'School / Tuition Fee' },
+  { value: 'transport', label: 'Bus Fee' },
+  { value: 'books', label: 'Books Fee' },
+  { value: 'all', label: 'All Fees' }
+];
+
 interface AdminRemindersProps {
   students: StudentData[];
   teachers: TeacherData[];
@@ -38,7 +48,7 @@ const AdminReminders: React.FC<AdminRemindersProps> = ({
   // Bulk Reminder Scheduling states
   const [showBulkReminderModal, setShowBulkReminderModal] = useState(false);
   const [bulkReminderOption, setBulkReminderOption] = useState<'immediate' | 'schedule'>('immediate');
-  const [bulkCustomMessage, setBulkCustomMessage] = useState('Dear Parent, this is a reminder regarding the outstanding fees for your ward. Please clear the dues at your earliest convenience.');
+  const [bulkFeeCategory, setBulkFeeCategory] = useState<FeeCategory>('all');
   const [scheduleTimeInput, setScheduleTimeInput] = useState('');
   const [scheduledTimesList, setScheduledTimesList] = useState<string[]>([]);
   const [activeScheduledReminders, setActiveScheduledReminders] = useState<any[]>([]);
@@ -111,11 +121,15 @@ const AdminReminders: React.FC<AdminRemindersProps> = ({
 
   const selectedStudent = students.find((s) => s.id === selectedStudentForReminder || s._id === selectedStudentForReminder);
   const hasSchoolDues = selectedStudent ? selectedStudent.feePending > 0 : false;
-  const hasBooksDues = selectedStudent ? (selectedStudent.booksFee && selectedStudent.booksFee > 0) : false;
-  const hasTransportDues = selectedStudent ? (selectedStudent.transportFee && selectedStudent.transportFee > 0) : false;
+  const hasBooksDues = selectedStudent ? !!(selectedStudent.booksFee && selectedStudent.booksFee > 0) : false;
+  const hasTransportDues = selectedStudent ? !!(selectedStudent.transportFee && selectedStudent.transportFee > 0) : false;
+  const hasAnyDues = hasSchoolDues || hasBooksDues || hasTransportDues;
+  const totalOutstanding = selectedStudent
+    ? selectedStudent.feePending + (selectedStudent.booksFee || 0) + (selectedStudent.transportFee || 0)
+    : 0;
 
 
-  const handleSendSingleReminder = async (studentId: string, feeCategory: 'school' | 'books' | 'transport') => {
+  const handleSendSingleReminder = async (studentId: string, feeCategory: FeeCategory) => {
     try {
       const token = getAccessToken();
       const headers: HeadersInit = { 'Content-Type': 'application/json' };
@@ -127,11 +141,10 @@ const AdminReminders: React.FC<AdminRemindersProps> = ({
         body: JSON.stringify({ studentId, feeCategory })
       });
       const data = await res.json();
-      if (data.success) {
-        showToast('Pending fee reminder WhatsApp notification dispatched!', 'success');
-      } else {
-        showToast(data.message || 'Reminder not sent — no approved WhatsApp template for a general fee reminder.', 'error');
-      }
+      showToast(
+        data.message || (data.success ? 'Fee reminder sent on WhatsApp.' : 'Reminder not sent.'),
+        data.success ? 'success' : 'error'
+      );
     } catch {
       showToast('Could not reach the server — reminder not sent.', 'error');
     }
@@ -199,7 +212,7 @@ const AdminReminders: React.FC<AdminRemindersProps> = ({
     setBulkReminderOption('immediate');
     setScheduledTimesList([]);
     setScheduleTimeInput('');
-    setBulkCustomMessage('Dear Parent, this is a reminder regarding the outstanding fees for your ward. Please clear the dues at your earliest convenience.');
+    setBulkFeeCategory('all');
     setShowBulkReminderModal(true);
   };
 
@@ -212,30 +225,21 @@ const AdminReminders: React.FC<AdminRemindersProps> = ({
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
     if (bulkReminderOption === 'immediate') {
-      let sent = 0;
-      let blocked = 0;
-      for (const id of selectedStudentIds) {
-        try {
-          const r = await fetch(`${API_BASE}/dashboard/send-reminder`, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({ studentId: id, message: bulkCustomMessage })
-          });
-          const d = await r.json().catch(() => ({}));
-          if (d.success) sent++;
-          else blocked++;
-        } catch {
-          blocked++;
-        }
-      }
-      if (sent > 0) {
-        showToast(`WhatsApp reminders sent to ${sent} parent(s).`, 'success');
-      } else {
+      // ONE call — the backend runs the shared fee calculation and queues one
+      // approved fee_general_reminder template per student with dues.
+      try {
+        const r = await fetch(`${API_BASE}/dashboard/send-reminder`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ studentIds: selectedStudentIds, feeCategory: bulkFeeCategory })
+        });
+        const d = await r.json().catch(() => ({}));
         showToast(
-          `No reminders sent (${blocked}). There is no approved WhatsApp template for a general fee reminder — ` +
-            `use "Run Installment Reminders" for installment dues.`,
-          'error'
+          d.message || (d.success ? 'WhatsApp fee reminders sent.' : 'No reminders sent.'),
+          d.success ? 'success' : 'error'
         );
+      } catch {
+        showToast('Could not reach the server — no reminders sent.', 'error');
       }
       setSelectedStudentIds([]);
       setShowBulkReminderModal(false);
@@ -251,12 +255,12 @@ const AdminReminders: React.FC<AdminRemindersProps> = ({
           body: JSON.stringify({
             studentIds: selectedStudentIds,
             scheduledTimes: scheduledTimesList,
-            message: bulkCustomMessage
+            feeCategory: bulkFeeCategory
           })
         });
         const data = await res.json();
         if (data.success) {
-          showToast(`Successfully scheduled ${scheduledTimesList.length} reminders for ${selectedStudentIds.length} students!`, 'success');
+          showToast(data.message || `Scheduled ${scheduledTimesList.length} reminder run(s) for ${selectedStudentIds.length} student(s).`, 'success');
           setSelectedStudentIds([]);
           setShowBulkReminderModal(false);
           fetchScheduledReminders();
@@ -1137,6 +1141,16 @@ const AdminReminders: React.FC<AdminRemindersProps> = ({
                 <div className="text-[13px] font-bold text-slate-800 dark:text-slate-100">Books Fee Reminder</div>
                 <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{hasBooksDues ? `Pending: ₹${(selectedStudent.booksFee || 0).toLocaleString()}` : 'No books fees pending'}</div>
               </button>
+              <button
+                disabled={!hasAnyDues}
+                onClick={() => { handleSendSingleReminder(selectedStudent.id || selectedStudent._id || '', 'all'); setSelectedStudentForReminder(null); }}
+                className={`flex flex-col items-start p-3 rounded-lg border text-left transition-all ${
+                  hasAnyDues ? 'border-amber-300 bg-amber-50 hover:bg-amber-100 cursor-pointer' : 'border-slate-200 bg-slate-50 opacity-50 cursor-not-allowed'
+                }`}
+              >
+                <div className="text-[13px] font-bold text-slate-800 dark:text-slate-100">All Fees</div>
+                <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{hasAnyDues ? `Total outstanding: ₹${totalOutstanding.toLocaleString()}` : 'No dues pending'}</div>
+              </button>
             </div>
             <button type="button" onClick={() => setSelectedStudentForReminder(null)} className="mt-3 w-full py-2 rounded-lg border border-slate-200 dark:border-slate-600 text-sm text-slate-500 dark:text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:bg-slate-900 transition-colors font-semibold">Cancel</button>
           </div>
@@ -1154,8 +1168,17 @@ const AdminReminders: React.FC<AdminRemindersProps> = ({
             <p className="text-xs text-slate-500 dark:text-slate-400 dark:text-slate-500 mb-4"><strong>{selectedStudentIds.length}</strong> students with outstanding dues selected.</p>
             <form onSubmit={submitBulkReminder} className="flex flex-col gap-3">
               <div>
-                <label className="text-xs font-bold text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1 block">Reminder Message</label>
-                <textarea className="w-full h-24 p-2.5 border border-slate-200 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-800 resize-none outline-none focus:border-violet-400 font-[inherit]" required value={bulkCustomMessage} onChange={e => setBulkCustomMessage(e.target.value)} placeholder="e.g. This is the first installment reminder." />
+                <label className="text-xs font-bold text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1.5 block">Fee Type</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {FEE_CATEGORY_OPTIONS.map(opt => (
+                    <label key={opt.value} className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer text-[12px] font-semibold transition-all ${
+                      bulkFeeCategory === opt.value ? 'bg-violet-50 border-violet-300 text-violet-700' : 'bg-white border-slate-200 text-slate-500'
+                    }`}>
+                      <input type="radio" name="bulkFeeCategory" className="sr-only" checked={bulkFeeCategory === opt.value} onChange={() => setBulkFeeCategory(opt.value)} />
+                      {opt.label}
+                    </label>
+                  ))}
+                </div>
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1.5 block">Dispatch Method</label>

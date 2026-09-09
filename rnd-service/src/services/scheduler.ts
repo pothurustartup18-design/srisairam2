@@ -4,6 +4,7 @@ import { Student } from '../models/student.model';
 import { Teacher } from '../models/teacher.model';
 import { normalizePhone } from './whatsapp.service';
 import { queueTemplateNotification } from '../config/queue';
+import { dispatchFeeReminders, normalizeFeeCategory } from './feeReminder.service';
 
 /** Delivery instruction for a broadcast that must go out as an approved Meta template. */
 export interface BroadcastTemplate {
@@ -218,6 +219,24 @@ export const startDatabaseScheduler = () => {
         }
 
         console.log(`[Scheduler] Processing alert: "${alert.title}" (ID: ${alert._id})`);
+
+        // Scheduled general fee/dues reminder ("Bulk Send → Schedule for Later").
+        // Same calculation + approved-template path as the immediate send — dues
+        // are resolved NOW (at fire time), one fee_general_reminder per student.
+        if (alert.kind === 'feeReminder') {
+          const summary = await dispatchFeeReminders(
+            alert.studentIds || [],
+            normalizeFeeCategory(alert.feeCategory)
+          );
+          console.log(
+            `[Scheduler] Fee reminder "${alert.title}" (${alert.feeCategory || 'all'}): ` +
+              `${summary.queued} queued, ${summary.skippedNoDues} no-dues, ${summary.skippedNoPhone} no-phone, ` +
+              `${summary.rejected} rejected of ${summary.requested}.`
+          );
+          alert.status = 'sent';
+          await alert.save();
+          continue;
+        }
 
         // Perform broadcast — as an approved template when the alert carries one
         // (announcement.broadcast / event.announcement), else legacy free-form.

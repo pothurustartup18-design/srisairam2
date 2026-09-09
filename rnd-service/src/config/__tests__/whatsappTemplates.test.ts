@@ -243,12 +243,16 @@ describe('announcement + event templates (MARKETING, text-only)', () => {
 });
 
 describe('registry completeness — every active production template is registered', () => {
-  it('has exactly the 9 expected keys → exact Meta names', () => {
+  it('has exactly the 10 expected keys → exact Meta names', () => {
     const expected: Record<string, string> = {
       'attendance.full': 'attendance_alert_full',
       'attendance.morning': 'attendance_alert_morning',
       'attendance.afternoon': 'attendance_alert_afternoon',
       'fee.receipt': 'fee_receipt',
+      // The approved `installment_reminder` template is a general fee reminder;
+      // fee.general_reminder + installment.reminder both point at it (different
+      // local param sets — see whatsappTemplates.ts).
+      'fee.general_reminder': 'installment_reminder',
       'report.card': 'report_card_notice',
       'installment.reminder': 'installment_reminder',
       'installment.overdue': 'installment_overdue',
@@ -270,24 +274,67 @@ describe('registry completeness — every active production template is register
 });
 
 describe('MISSING_TEMPLATES / blockedNotice — proactive features with no approved template', () => {
-  it('documents the 4 known gaps', () => {
+  it('documents the 3 known gaps (fee.general_reminder now has an approved template)', () => {
     expect(Object.keys(MISSING_TEMPLATES).sort()).toEqual(
-      ['auth.otp', 'fee.general_reminder', 'staff.credentials', 'transport.alert'].sort()
+      ['auth.otp', 'staff.credentials', 'transport.alert'].sort()
     );
+    expect(Object.keys(MISSING_TEMPLATES)).not.toContain('fee.general_reminder');
   });
 
   it('blockedNotice returns a non-success, non-retryable "not sent" payload', () => {
-    const n = blockedNotice('fee.general_reminder');
+    const n = blockedNotice('transport.alert');
     expect(n.success).toBe(false);
     expect(n.blocked).toBe(true);
     expect(n.reason).toBe('NO_APPROVED_TEMPLATE');
-    expect(n.missingTemplate).toBe('fee.general_reminder');
+    expect(n.missingTemplate).toBe('transport.alert');
     expect(n.message).toMatch(/was NOT sent/);
-    expect(n.message).toMatch(/installment_reminder/);
   });
 
   it('blockedNotice covers transport + staff credentials', () => {
     expect(blockedNotice('transport.alert').message).toMatch(/bus/i);
     expect(blockedNotice('staff.credentials').message).toMatch(/REJECTED/);
+  });
+});
+
+describe('fee.general_reminder — the "🚀" general dues reminder template', () => {
+  const FEE_GENERAL = {
+    student_name_en: 'Harsha',
+    fee_type_en: 'Total Outstanding Fees',
+    amount_en: '12,500',
+    student_name_te: 'Harsha',
+    fee_type_te: 'మొత్తం బకాయి ఫీజు',
+    amount_te: '12,500'
+  };
+
+  it('maps to installment_reminder / en / 6 named params / no header', () => {
+    const def = getRegisteredTemplate('fee.general_reminder')!;
+    expect(def.metaName).toBe('installment_reminder');
+    expect(def.language).toBe('en');
+    expect(def.category).toBe('fees');
+    expect(def.header).toBeUndefined();
+    expect(def.parameters).toEqual([
+      'student_name_en', 'fee_type_en', 'amount_en',
+      'student_name_te', 'fee_type_te', 'amount_te'
+    ]);
+  });
+
+  it('resolves with all 6 params in order', () => {
+    const res = resolveTemplateMessage('fee.general_reminder', FEE_GENERAL);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.message.metaName).toBe('installment_reminder');
+    expect(Object.keys(res.message.named)).toEqual([
+      'student_name_en', 'fee_type_en', 'amount_en',
+      'student_name_te', 'fee_type_te', 'amount_te'
+    ]);
+    expect(res.message.named.fee_type_te).toBe('మొత్తం బకాయి ఫీజు');
+  });
+
+  it('rejects when a param is missing', () => {
+    const { amount_te, ...rest } = FEE_GENERAL;
+    const res = resolveTemplateMessage('fee.general_reminder', rest);
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toMatch(/amount_te/);
   });
 });
