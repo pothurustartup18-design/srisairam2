@@ -3,6 +3,7 @@ import { Exam } from '../models/exam.model';
 import { Teacher } from '../models/teacher.model';
 import { SchoolProfile } from '../models/schoolProfile.model';
 import { Attendance } from '../models/attendance.model';
+import { filterWorkingAttendanceRegisters } from './calendar.service';
 import { getS3Client, extractS3Key } from './s3.service';
 import { getGradeBands, gradeFor } from './grading.service';
 import { ReportCardTokenService } from './reportCardToken.service';
@@ -76,11 +77,12 @@ export interface AttendanceSummary {
   percentage: number | null;
 }
 
-async function computeAttendanceSummary(studentId: string): Promise<AttendanceSummary> {
+async function computeAttendanceSummary(studentId: string, className?: string): Promise<AttendanceSummary> {
   let workingDays = 0;
   let presentDays = 0;
 
-  const records = await Attendance.find({ 'records.student': studentId });
+  let records = await Attendance.find({ 'records.student': studentId });
+  records = await filterWorkingAttendanceRegisters(records, className);
   workingDays = records.length;
   records.forEach((reg) => {
     const rec = reg.records.find((r: any) => String(r.student) === studentId);
@@ -325,7 +327,7 @@ export async function buildReportCardViewModel(
 
       const photoDataUri = photoKey ? await resolveImageToDataUri(photoKey) : null;
 
-      const attendance = await computeAttendanceSummary(sId);
+      const attendance = await computeAttendanceSummary(sId, studentClass);
 
       const token = ReportCardTokenService.generateToken({ examId, studentId: sId });
       const verificationUrl = `http://${appHost}/?report_verify_token=${token}`;

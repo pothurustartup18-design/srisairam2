@@ -8,6 +8,7 @@ import { queueTemplateNotification } from '../../config/queue';
 import { SystemConfig } from '../../models/systemConfig.model';
 import { clearCache } from '../../middlewares/cache.middleware';
 import { requireOwnStudent } from '../../middlewares/threadAccess.middleware';
+import { filterWorkingAttendanceRegisters } from '../../services/calendar.service';
 
 const router = Router();
 
@@ -284,6 +285,7 @@ router.get('/report/monthly', requirePermission('attendance:view'), async (req: 
 
     let registers: Array<{ records: Array<{ student: any; status: string }> }>;
     registers = await Attendance.find({ classTeacher: teacherId, date: { $gte: start, $lt: end } });
+    registers = await filterWorkingAttendanceRegisters(registers);
 
     const counts = tallyAttendance(registers);
     const studentIds = Object.keys(counts);
@@ -332,6 +334,7 @@ router.get('/report/defaulters', requirePermission('attendance:view'), async (re
 
     let registers: Array<{ records: Array<{ student: any; status: string }> }>;
     registers = await Attendance.find({ classTeacher: teacherId });
+    registers = await filterWorkingAttendanceRegisters(registers);
 
     const counts = tallyAttendance(registers);
     const defaulterIds = Object.keys(counts).filter(sId => {
@@ -368,7 +371,8 @@ router.get('/student-stats', requirePermission('attendance:view'), async (req: R
 
     const stats: Record<string, number> = {};
 
-    const registers = await Attendance.find({ classTeacher: teacherId });
+    let registers = await Attendance.find({ classTeacher: teacherId });
+    registers = await filterWorkingAttendanceRegisters(registers);
     const studentRegistersCount: Record<string, { total: number; present: number }> = {};
 
     registers.forEach((reg) => {
@@ -410,7 +414,8 @@ router.get('/summary/student/:studentId', requireOwnStudent(), async (req: Reque
     let workingDays = 0;
     let presentDays = 0;
 
-    const records = await Attendance.find({ 'records.student': studentId });
+    let records = await Attendance.find({ 'records.student': studentId });
+    records = await filterWorkingAttendanceRegisters(records);
     workingDays = records.length;
     records.forEach((reg) => {
       const rec = reg.records.find((r: any) => String(r.student) === studentId);

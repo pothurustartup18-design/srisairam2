@@ -42,6 +42,7 @@ import adminClassRoutes from './routes/admin/class.routes';
 import adminFeeStructureRoutes from './routes/admin/feeStructure.routes';
 import adminExpenditureRoutes from './routes/admin/expenditure.routes';
 import schoolProfileRoutes from './routes/admin/schoolProfile.routes';
+import adminCalendarRoutes from './routes/admin/calendar.routes';
 
 // Import Routes - Teacher
 import teacherAttendanceRoutes from './routes/teacher/attendance.routes';
@@ -154,8 +155,9 @@ app.use('/api/expenditure', authenticateJWT, adminExpenditureRoutes);
 // Homework routes (Teacher creates, Parent reads/acknowledges)
 app.use('/api/homework', authenticateJWT, sharedHomeworkRoutes);
 
-// Attendance routes (Teacher)
+// Attendance & Calendar routes
 app.use('/api/attendance', authenticateJWT, teacherAttendanceRoutes);
+app.use('/api/calendar', authenticateJWT, adminCalendarRoutes);
 
 // Marks/Exams routes (Teacher & Parent)
 app.use('/api/marks', authenticateJWT, teacherMarksRoutes);
