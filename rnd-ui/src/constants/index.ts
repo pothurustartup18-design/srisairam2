@@ -15,6 +15,15 @@ export const formatClassName = (className: string, section?: string): string => 
   return `${formattedClass} - ${section}`;
 };
 
+export const formatRoomDisplay = (room: string): string => {
+  if (!room) return '';
+  const clean = room.replace(/^class\s+/i, '').trim();
+  const parts = clean.split('-');
+  const className = parts[0]?.trim() || '';
+  const section = parts.slice(1).join('-').trim();
+  return formatClassName(className, section);
+};
+
 export const classOrder = ['NURSERY', 'NUS', 'LKG', 'UKG', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
 
 export const sortClasses = (classes: string[]): string[] => {

@@ -353,3 +353,17 @@ export interface ToastState {
   message: string;
   type: 'success' | 'error';
 }
+
+// ─── Academic Calendar & Holidays ───────────────────────────────────────────
+
+export interface HolidayData {
+  _id: string;
+  date: string;
+  endDate?: string;
+  title: string;
+  type: 'holiday' | 'vacation' | 'working_day_override';
+  category: 'festival' | 'national_holiday' | 'emergency' | 'special_working_day' | 'weekly_off' | 'other';
+  isSchoolWide: boolean;
+  applicableClasses: string[];
+  description?: string;
+}
