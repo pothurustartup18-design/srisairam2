@@ -75,6 +75,7 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
     setSelectedStudent(student);
     const tuition = student.feePending || 0;
     const books = student.booksFee || 0;
+    const transport = student.transportFee || 0;
     setPaymentType(tuition > 0 ? 'school' : books > 0 ? 'books' : 'transport');
     setPaymentAmount('');
     setStep('payment');
@@ -313,7 +314,7 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
                   <div className="cf-student-card-info">
                     <div className="cf-student-card-name">{s.name}</div>
                     <div className="cf-student-card-meta">Adm: {s.admissionNo} · Class {s.class}-{s.section}</div>
-                    <div className="cf-student-card-meta">Parent: {s.fatherName || s.motherName || '—'}</div>
+                    <div className="cf-student-card-meta">Parent: {s.parentName || '—'}</div>
                   </div>
                 </div>
 

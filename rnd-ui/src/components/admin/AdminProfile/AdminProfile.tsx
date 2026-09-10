@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
-  User, Save, Shield, Key, Camera,
-  Send, Trash2, Eye, EyeOff, Loader2
+  User, Mail, Phone, Lock, Save, Shield, Key, Camera,
+  MessageSquare, Send, Trash2, Eye, EyeOff, Loader2
 } from 'lucide-react';
 import { useSchool } from '../../../context/schoolContext';
 import { useAuth } from '../../../context/authContext';

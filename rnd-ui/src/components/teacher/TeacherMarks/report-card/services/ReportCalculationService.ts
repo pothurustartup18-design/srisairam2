@@ -36,3 +36,48 @@ export function getGradeForPercentage(pct: number, gradeBands: GradeBand[]): Gra
   }
   return sortedBands[sortedBands.length - 1] || { min: 0, grade: 'F', gradePoint: '0.0', remarks: 'Fail' };
 }
+
+export function calculateCGPA(marks: ReportCardSubjectRow[], gradeBands: GradeBand[]): string {
+  const gradedSubjects = marks.filter((m) => m.obtainedMarks !== null);
+  if (gradedSubjects.length === 0) return '0.0';
+
+  let totalPoints = 0;
+  gradedSubjects.forEach((sub) => {
+    const pct = sub.totalMarks > 0 ? ((sub.obtainedMarks || 0) / sub.totalMarks) * 100 : 0;
+    const band = getGradeForPercentage(pct, gradeBands);
+    totalPoints += parseFloat(band.gradePoint);
+  });
+
+  const cgpa = totalPoints / gradedSubjects.length;
+  return cgpa.toFixed(2);
+}
+
+export function getPassFailStatus(percentage: number, gradeBands: GradeBand[]): 'PASS' | 'FAIL' {
+  const sortedBands = [...gradeBands].sort((a, b) => a.min - b.min);
+  const lowestPassingBand = sortedBands.find((b) => b.grade !== 'F' && b.grade !== 'E'); // standard passing threshold
+  const threshold = lowestPassingBand ? lowestPassingBand.min : 40;
+  return percentage >= threshold ? 'PASS' : 'FAIL';
+}
+
+export function getPromotionStatus(
+  result: 'PASS' | 'FAIL' | 'ABSENT',
+  currentClass: string
+): { status: 'promoted' | 'retained' | 'unknown'; nextClass: string | null } {
+  if (result === 'ABSENT') {
+    return { status: 'unknown', nextClass: null };
+  }
+  if (result === 'FAIL') {
+    return { status: 'retained', nextClass: null };
+  }
+
+  const match = currentClass.match(/\d+/);
+  if (!match) {
+    return { status: 'promoted', nextClass: 'Next Grade' };
+  }
+  const currentNum = parseInt(match[0], 10);
+  const sectionPart = currentClass.replace(String(currentNum), '').trim();
+  const nextNum = currentNum + 1;
+  const nextClass = `Grade ${nextNum}${sectionPart ? ' ' + sectionPart : ''}`;
+
+  return { status: 'promoted', nextClass };
+}

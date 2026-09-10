@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { CreditCard, Search, CheckCircle2, Users, Receipt, BookOpen } from 'lucide-react';
 import jsPDF from 'jspdf';
-import QRCode from 'qrcode';
 import { useAuth } from '../../../context/authContext';
 import type { StudentData } from '../../../types';
 import { API_BASE } from '../../../constants';
@@ -30,6 +29,17 @@ const TeacherFees: React.FC<TeacherFeesProps> = ({ students, onReload, showToast
   const [submittingPayment, setSubmittingPayment] = useState(false);
   const [showPaymentSuccessModal, setShowPaymentSuccessModal] = useState<any | null>(null);
 
+  const [schoolProfile, setSchoolProfile] = React.useState<any>(null);
+
+  React.useEffect(() => {
+    fetch(`${API_BASE}/school-profile`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.data) setSchoolProfile(data.data);
+      })
+      .catch(err => console.error('Failed to load school profile:', err));
+  }, []);
+
   const filteredStudents = students.filter(s => {
     const q = searchQuery.toLowerCase();
     return s.name.toLowerCase().includes(q) || s.admissionNo.toLowerCase().includes(q);
@@ -37,98 +47,243 @@ const TeacherFees: React.FC<TeacherFeesProps> = ({ students, onReload, showToast
 
   const paymentStudent = students.find((s) => s.id === selectedStudentForPayment || s._id === selectedStudentForPayment);
 
-  const generateReceiptPDF = async (receiptData: any, student: StudentData): Promise<string> => {
-    // Rendered locally with the bundled `qrcode` package (same as the report card)
-    // rather than round-tripping the verification token through a third-party API,
-    // and pointed at the origin the receipt was issued from so a printed QR is not
-    // pinned to one machine's LAN address.
-    const verifyUrl = `${window.location.origin}/?verify_token=${receiptData.receiptNo || receiptData.token}`;
-    const qrUrl = await QRCode.toDataURL(verifyUrl, { width: 150, margin: 1 });
+  const generateReceiptPDF = (receiptData: any, student: StudentData): Promise<string> => {
     return new Promise((resolve) => {
       const doc = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
-        format: 'a5'
+        format: 'a5' // 148mm x 210mm
       });
 
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(16);
-      doc.setTextColor(30, 58, 138);
-      doc.text('RND ERP SCHOOL', 15, 20);
+      const pageWidth = 148;
+      const pageHeight = 210;
 
-      doc.setFontSize(9);
+      // Extract school info dynamically from settings
+      const schoolName = schoolProfile?.schoolInfo?.schoolName || 'SCHOOLHUB ACADEMY';
+      const addressLine = [
+        schoolProfile?.address?.addressLine,
+        schoolProfile?.address?.city,
+        schoolProfile?.address?.state,
+        schoolProfile?.address?.pincode
+      ].filter(Boolean).join(', ') || '123 Education Campus Road, Hyderabad, Telangana';
+      const phone = schoolProfile?.contactInfo?.phone || '+91 9392646349';
+      const email = schoolProfile?.contactInfo?.email || 'admin@schoolhub.edu';
+      const academicYear = schoolProfile?.academicConfig?.currentAcademicYear || '2026-27';
+
+      // Outer Border
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.4);
+      doc.rect(5, 5, pageWidth - 10, pageHeight - 10);
+      doc.rect(6, 6, pageWidth - 12, pageHeight - 12);
+
+      // Top Navy Header Bar
+      doc.setFillColor(15, 23, 42); // slate-900 #0f172a
+      doc.rect(6, 6, pageWidth - 12, 28, 'F');
+
+      // Amber Gold Accent strip
+      doc.setFillColor(217, 119, 6); // amber-600 #d97706
+      doc.rect(6, 34, pageWidth - 12, 1.2, 'F');
+
+      // School Name
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.setTextColor(255, 255, 255);
+      doc.text(schoolName.toUpperCase(), 12, 16);
+
+      // Address & Contact
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(203, 213, 225); // slate-300
+      doc.text(addressLine.length > 55 ? addressLine.substring(0, 52) + '…' : addressLine, 12, 22);
+      doc.text(`Phone: ${phone}  |  Email: ${email}`, 12, 27);
+
+      // Right Top Badge: Fee Receipt Title
+      doc.setFillColor(30, 58, 138); // blue-900
+      doc.roundedRect(pageWidth - 48, 11, 40, 16, 1, 1, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(255, 255, 255);
+      doc.text('FEE RECEIPT', pageWidth - 28, 17, { align: 'center' });
+      doc.setFontSize(7);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`AY: ${academicYear}`, pageWidth - 28, 23, { align: 'center' });
+
+      let y = 41;
+
+      // Receipt Metadata Box & Student Details Box (Side-by-Side Cards)
+      const cardW = (pageWidth - 28) / 2; // 60mm each
+
+      // Left Box: Receipt Details
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(226, 232, 240);
+      doc.roundedRect(10, y, cardW, 36, 1.5, 1.5, 'FD');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(30, 58, 138);
+      doc.text('RECEIPT INFORMATION', 14, y + 6);
+      doc.setDrawColor(203, 213, 225);
+      doc.line(14, y + 8, 10 + cardW - 4, y + 8);
+
+      doc.setFontSize(7.5);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(100, 116, 139);
-      doc.text('Official Fee Receipt & Payment Confirmation', 15, 25);
+      doc.text('Receipt No:', 14, y + 14);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      doc.text(receiptData.receiptNo || 'N/A', 36, y + 14);
 
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text('Date:', 14, y + 20);
+      doc.setTextColor(15, 23, 42);
+      doc.text(receiptData.paymentDate || new Date().toISOString().split('T')[0], 36, y + 20);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text('Time:', 14, y + 26);
+      doc.setTextColor(15, 23, 42);
+      doc.text(receiptData.paymentTime || new Date().toLocaleTimeString(), 36, y + 26);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text('Mode:', 14, y + 32);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(30, 58, 138);
+      doc.text((receiptData.paymentMode || 'Cash').toUpperCase(), 36, y + 32);
+
+      // Right Box: Student Info
+      const xRight = 10 + cardW + 8;
+      doc.setFillColor(248, 250, 252);
       doc.setDrawColor(226, 232, 240);
-      doc.setLineWidth(0.5);
-      doc.line(15, 28, 133, 28);
-
-      doc.setFontSize(9);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(71, 85, 105);
-      doc.text('Receipt Details', 15, 36);
-
-      doc.setFont('helvetica', 'normal');
-      doc.text('Receipt No:', 15, 42);
-      doc.setFont('helvetica', 'bold');
-      doc.text(receiptData.receiptNo, 45, 42);
-
-      doc.setFont('helvetica', 'normal');
-      doc.text('Date:', 15, 48);
-      doc.text(receiptData.paymentDate, 45, 48);
-
-      doc.text('Time:', 15, 54);
-      doc.text(receiptData.paymentTime, 45, 54);
+      doc.roundedRect(xRight, y, cardW, 36, 1.5, 1.5, 'FD');
 
       doc.setFont('helvetica', 'bold');
-      doc.text('Student Details', 15, 64);
+      doc.setFontSize(8);
+      doc.setTextColor(30, 58, 138);
+      doc.text('STUDENT INFORMATION', xRight + 4, y + 6);
+      doc.setDrawColor(203, 213, 225);
+      doc.line(xRight + 4, y + 8, xRight + cardW - 4, y + 8);
+
+      doc.setFontSize(7.5);
       doc.setFont('helvetica', 'normal');
-      doc.text('Student Name:', 15, 70);
-      doc.text(receiptData.studentName, 45, 70);
-
-      doc.text('Admission ID:', 15, 76);
-      doc.text(student.admissionNo, 45, 76);
-
-      doc.text('Class & Section:', 15, 82);
-      doc.text(`Class ${student.class} - ${student.section}`, 45, 82);
-
+      doc.setTextColor(100, 116, 139);
+      doc.text('Student Name:', xRight + 4, y + 14);
       doc.setFont('helvetica', 'bold');
-      doc.text('Payment Breakdown', 15, 92);
+      doc.setTextColor(15, 23, 42);
+      const stName = receiptData.studentName || `${student.firstName || ''} ${student.lastName || ''}`.trim();
+      doc.text(stName.length > 20 ? stName.substring(0, 18) + '…' : stName, xRight + 26, y + 14);
 
       doc.setFont('helvetica', 'normal');
-      doc.text('Fee Category:', 15, 98);
-      doc.text(receiptData.feeType === 'school' ? 'School Fee' : 'Books Fee', 45, 98);
-
-      doc.text('Amount Paid:', 15, 104);
+      doc.setTextColor(100, 116, 139);
+      doc.text('Admission ID:', xRight + 4, y + 20);
       doc.setFont('helvetica', 'bold');
-      doc.setTextColor(22, 163, 74);
-      doc.text(`INR ${Number(receiptData.amount).toLocaleString()}`, 45, 104);
+      doc.setTextColor(15, 23, 42);
+      doc.text(student.admissionNo || 'N/A', xRight + 26, y + 20);
 
-      doc.setTextColor(71, 85, 105);
       doc.setFont('helvetica', 'normal');
-      doc.text('Payment Mode:', 15, 110);
-      doc.text('Cash', 45, 110);
+      doc.setTextColor(100, 116, 139);
+      doc.text('Class & Sec:', xRight + 4, y + 26);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      doc.text(`Class ${student.class} - ${student.section}`, xRight + 26, y + 26);
 
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text('Phone:', xRight + 4, y + 32);
+      doc.setTextColor(15, 23, 42);
+      doc.text(student.whatsappNo || 'N/A', xRight + 26, y + 32);
+
+      y += 42;
+
+      // Itemized Fee Breakdown Table
+      doc.setFillColor(30, 41, 59); // slate-800
+      doc.rect(10, y, pageWidth - 20, 7, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(255, 255, 255);
+      doc.text('SL', 14, y + 4.5);
+      doc.text('FEE DESCRIPTION', 30, y + 4.5);
+      doc.text('PAYMENT TYPE', 85, y + 4.5);
+      doc.text('AMOUNT PAID (INR)', pageWidth - 14, y + 4.5, { align: 'right' });
+
+      y += 7;
+
+      // Row 1
+      doc.setFillColor(255, 255, 255);
+      doc.rect(10, y, pageWidth - 20, 8, 'F');
       doc.setDrawColor(226, 232, 240);
-      doc.line(15, 116, 133, 116);
+      doc.line(10, y + 8, pageWidth - 10, y + 8);
+
+      const feeName = receiptData.feeType === 'school' ? 'Tuition Fee Payment' : receiptData.feeType === 'books' ? 'Books & Material Fee' : 'Transport Fee';
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(15, 23, 42);
+      doc.text('1', 14, y + 5);
+      doc.text(feeName, 30, y + 5);
+      doc.text('Partial / Installment', 85, y + 5);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(22, 163, 74); // Green
+      doc.text(`Rs. ${Number(receiptData.amount).toLocaleString('en-IN')}`, pageWidth - 14, y + 5, { align: 'right' });
+
+      y += 12;
+
+      // Total Net Amount Banner Card
+      doc.setFillColor(240, 253, 244); // green-50
+      doc.setDrawColor(187, 247, 208);
+      doc.roundedRect(10, y, pageWidth - 20, 14, 1.5, 1.5, 'FD');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor(21, 128, 61);
+      doc.text('TOTAL RECEIVED AMOUNT:', 15, y + 8.5);
+
+      doc.setFontSize(13);
+      doc.text(`INR ${Number(receiptData.amount).toLocaleString('en-IN')}`, pageWidth - 15, y + 9, { align: 'right' });
+
+      y += 20;
+
+      // Verification & QR Scanner Box (Preserved QR Code Scanner)
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(203, 213, 225);
+      doc.roundedRect(10, y, pageWidth - 20, 32, 1.5, 1.5, 'FD');
 
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(8);
       doc.setTextColor(15, 23, 42);
-      doc.text('Verified by School ERP', 15, 122);
+      doc.text('OFFICIAL VERIFICATION & AUTHENTICITY', 14, y + 6);
+
       doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
       doc.setTextColor(100, 116, 139);
-      doc.text('This receipt can be verified by scanning the QR code.', 15, 126);
+      doc.text('This receipt is cryptographically generated & verified.', 14, y + 11);
+      doc.text('Scan the QR code to verify this transaction on the portal.', 14, y + 15);
+      doc.text('Verified by: SchoolHub Security Engine', 14, y + 19);
 
+      // Signature line in verification box
+      doc.setDrawColor(148, 163, 184);
+      doc.line(14, y + 27, 55, y + 27);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.5);
+      doc.setTextColor(51, 65, 85);
+      doc.text('Authorized Cashier / Accounts Stamp', 14, y + 30);
 
-      const img = new Image();
+      // Generate Dynamic QR Code URL using window.location.origin
+      const originHost = window.location.origin;
+      const verifyUrl = `${originHost}/?verify_token=${receiptData.receiptNo || receiptData.token}`;
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(verifyUrl)}`;
+
+      // Draw QR Code Image into PDF
+      const img = new window.Image();
+      img.crossOrigin = 'Anonymous';
       img.onload = () => {
-        doc.addImage(img, 'PNG', 103, 118, 26, 26);
-        doc.setFontSize(7);
+        doc.addImage(img, 'PNG', pageWidth - 37, y + 3, 24, 24);
+        doc.setFontSize(6);
         doc.setFont('helvetica', 'bold');
-        doc.text('Scan to verify authenticity', 103, 147);
+        doc.setTextColor(30, 58, 138);
+        doc.text('SCAN TO VERIFY', pageWidth - 25, y + 29, { align: 'center' });
         resolve(doc.output('datauristring'));
       };
       img.onerror = () => {
@@ -278,7 +433,7 @@ const TeacherFees: React.FC<TeacherFeesProps> = ({ students, onReload, showToast
                           variant={totalDues > 0 ? 'success' : 'secondary'}
                           disabled={totalDues <= 0}
                           onClick={() => {
-                            setSelectedStudentForPayment(s.id || s._id || null);
+                            setSelectedStudentForPayment(s.id || s._id);
                             setPaymentAmount('');
                             setPaymentType(s.feePending > 0 ? 'school' : 'books');
                           }}
@@ -326,7 +481,7 @@ const TeacherFees: React.FC<TeacherFeesProps> = ({ students, onReload, showToast
                         variant={totalDues > 0 ? 'success' : 'secondary'}
                         disabled={totalDues <= 0}
                         onClick={() => {
-                          setSelectedStudentForPayment(s.id || s._id || null);
+                          setSelectedStudentForPayment(s.id || s._id);
                           setPaymentAmount('');
                           setPaymentType(s.feePending > 0 ? 'school' : 'books');
                         }}

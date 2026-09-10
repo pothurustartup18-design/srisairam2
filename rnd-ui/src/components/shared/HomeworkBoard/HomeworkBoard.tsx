@@ -4,7 +4,7 @@ import {
   BookOpen, Clock, AlertCircle, Users, X, Calendar
 } from 'lucide-react';
 import type { HomeworkData, ClassData } from '../../../types';
-import { API_BASE } from '../../../constants';
+import { API_BASE, formatClassName, formatRoomDisplay, sortClasses } from '../../../constants';
 import { cn } from '../../../lib/utils';
 import { Button, Badge, EmptyState, LoadingSpinner, Drawer } from '../../ui';
 
@@ -26,12 +26,45 @@ const inputCls = 'h-9 px-3 border border-slate-200 rounded-md text-sm text-slate
 const HomeworkBoard: React.FC<HomeworkBoardProps> = ({
   mode, classesList = [], assignedClasses = [], wardClassRoom, wardId, showToast,
 }) => {
-  const availableRooms = mode === 'admin'
-    ? Array.from(new Set(classesList.map(c => `${c.className}-${c.section}`)))
-    : mode === 'teacher' ? assignedClasses
-    : wardClassRoom ? [wardClassRoom] : [];
+  const availableRooms = useMemo(() => {
+    if (mode === 'admin') {
+      if (!classesList || classesList.length === 0) return [];
+      const distinctGrades = sortClasses(Array.from(new Set(classesList.map(c => c.className))));
+      const list: { key: string; label: string }[] = [];
+      distinctGrades.forEach(grade => {
+        const matching = classesList.filter(c => c.className === grade);
+        matching.forEach(c => {
+          const roomKey = (!c.section || c.section === '-' || c.section === '--') ? c.className : `${c.className}-${c.section}`;
+          const label = formatClassName(c.className, c.section);
+          if (!list.some(r => r.key === roomKey)) {
+            list.push({ key: roomKey, label });
+          }
+        });
+      });
+      return list;
+    }
+    if (mode === 'teacher') {
+      return (assignedClasses || []).map(r => ({
+        key: r,
+        label: formatRoomDisplay(r)
+      }));
+    }
+    if (wardClassRoom) {
+      return [{ key: wardClassRoom, label: formatRoomDisplay(wardClassRoom) }];
+    }
+    return [];
+  }, [mode, classesList, assignedClasses, wardClassRoom]);
 
-  const [selectedRoom, setSelectedRoom] = useState(availableRooms[0] || '');
+  const [selectedRoom, setSelectedRoom] = useState(availableRooms[0]?.key || '');
+
+  useEffect(() => {
+    if ((!selectedRoom || !availableRooms.some(r => r.key === selectedRoom)) && availableRooms.length > 0) {
+      setSelectedRoom(availableRooms[0].key);
+    }
+  }, [availableRooms, selectedRoom]);
+
+  const selectedRoomObj = availableRooms.find(r => r.key === selectedRoom);
+  const selectedRoomLabel = selectedRoomObj?.label || (selectedRoom ? formatRoomDisplay(selectedRoom) : 'your class');
   const [items,        setItems]        = useState<HomeworkData[]>([]);
   const [loading,      setLoading]      = useState(false);
   const [showDrawer,   setShowDrawer]   = useState(false);
@@ -192,38 +225,46 @@ const HomeworkBoard: React.FC<HomeworkBoardProps> = ({
   // ─── RENDER ────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col gap-5 font-sans text-slate-900">
-
-      {/* Page header — title + class switcher + primary action all in one line */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex items-start gap-4">
-          <div>
-            <h1 className="text-[22px] font-extrabold text-slate-900 tracking-tight">Homework Board</h1>
-            <div className="flex items-center gap-2 mt-1 flex-wrap">
-              {/* Class room selector is a compact inline control in the header */}
-              {availableRooms.length > 1 && (
-                <select
-                  className="h-8 pl-3 pr-7 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 bg-white outline-none focus:border-blue-500 transition-colors appearance-none cursor-pointer shadow-2xs"
-                  value={selectedRoom} onChange={e => setSelectedRoom(e.target.value)}>
-                  {availableRooms.map(room => <option key={room} value={room}>{room}</option>)}
-                </select>
-              )}
-              {availableRooms.length === 1 && (
-                <span className="text-xs font-bold text-slate-600 bg-slate-100/90 px-2.5 py-1 rounded-md border border-slate-200/70">{selectedRoom}</span>
-              )}
-              {availableRooms.length === 0 && (
-                <span className="text-xs font-bold text-red-500">No class room assigned</span>
-              )}
-              {selectedRoom && (
-                <span className="text-xs text-slate-400 font-medium">{items.length} assignment{items.length !== 1 ? 's' : ''}</span>
-              )}
-            </div>
-          </div>
+      {/* ─── PAGE HEADER (Matches Admin Style) ─── */}
+      <div className="flex items-start justify-between gap-4 flex-wrap bg-white border border-slate-200 rounded-xl px-6 py-5 shadow-card">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900 m-0">Homework &amp; Class Tasks</h2>
+          <p className="text-sm text-slate-500 mt-1">
+            Official daily homework assignments, project work, and submission tracking for {selectedRoomLabel}.
+          </p>
         </div>
-        {canManage && (
-          <Button onClick={() => { setForm(emptyForm); setAttachments([]); setShowDrawer(true); }}>
-            <Plus size={14} /> Post Homework
-          </Button>
-        )}
+
+        <div className="flex items-center gap-2.5 flex-wrap">
+          {availableRooms.length > 1 && (
+            <select
+              className="h-9 pl-3 pr-8 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 bg-white outline-none focus:border-blue-600 transition-colors appearance-none cursor-pointer shadow-2xs"
+              value={selectedRoom}
+              onChange={(e) => setSelectedRoom(e.target.value)}
+            >
+              {availableRooms.map((room) => (
+                <option key={room.key} value={room.key}>
+                  {room.label}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {availableRooms.length === 1 && (
+            <span className="inline-flex items-center gap-1.5 text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 rounded-lg px-3 py-1.5">
+              <BookOpen size={14} /> {selectedRoomLabel}
+            </span>
+          )}
+
+          <span className="text-xs font-bold text-slate-600 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
+            {items.length} Assignment{items.length !== 1 ? 's' : ''}
+          </span>
+
+          {canManage && (
+            <Button onClick={() => { setForm(emptyForm); setAttachments([]); setShowDrawer(true); }}>
+              <Plus size={14} /> Post Homework
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Modern KPI Stat Cards — admin/teacher only */}
@@ -476,7 +517,7 @@ const HomeworkBoard: React.FC<HomeworkBoardProps> = ({
         isOpen={showDrawer}
         onClose={() => setShowDrawer(false)}
         title="Post Homework"
-        subtitle={selectedRoom ? `Posting to ${selectedRoom}` : undefined}
+        subtitle={selectedRoom ? `Posting to ${selectedRoomLabel}` : undefined}
         footer={
           <div className="flex gap-2">
             <Button type="submit" form="hw-form" disabled={saving} className="flex-1 justify-center">

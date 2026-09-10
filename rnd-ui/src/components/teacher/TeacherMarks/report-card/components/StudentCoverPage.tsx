@@ -1,6 +1,7 @@
 import React from 'react';
 import { User, BookOpen, Fingerprint, UserCheck, PhoneCall, Globe } from 'lucide-react';
 import { Header } from './Header';
+import { Footer } from './Footer';
 import type { ReportCardViewModel, StudentReportEntry } from '../models/ReportCardViewModel';
 
 interface StudentCoverPageProps {

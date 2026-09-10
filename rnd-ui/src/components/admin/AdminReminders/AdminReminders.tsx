@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Send, CreditCard, Search, Calendar, Clock, Trash, Plus, X, MapPin, MessageSquare, Check, RefreshCw, Mic, FileAudio, Image 
+  Send, CreditCard, Search, Calendar, Clock, Trash, Plus, X, CheckCircle, 
+  MapPin, MessageSquare, Check, RefreshCw, Mic, FileAudio, Image 
 } from 'lucide-react';
+import jsPDF from 'jspdf';
 import type { StudentData, ClassData, TeacherData } from '../../../types';
 import { API_BASE, sortClasses } from '../../../constants';
 import { getAccessToken } from '../../../services/api';
-import { DataTable, MobileCardList, MobileRowCard, EmptyState } from '../../ui';
+import { DataTable, Th, Td, Tr, MobileCardList, MobileRowCard, EmptyState } from '../../ui';
 
-// Fee selection for the "🚀" WhatsApp reminder — wired to the approved
-// `fee_general_reminder` Meta template. 'all' → total outstanding across all heads.
+// Fee selection for the "🚀" WhatsApp reminder. Individual + bulk use the SAME
+// options and the SAME backend flow, which sends the approved installment_reminder
+// template (student_name / fee_type / amount). 'all' → total outstanding.
 type FeeCategory = 'school' | 'transport' | 'books' | 'all';
 const FEE_CATEGORY_OPTIONS: { value: FeeCategory; label: string }[] = [
   { value: 'school', label: 'School / Tuition Fee' },
@@ -186,26 +189,6 @@ const AdminReminders: React.FC<AdminRemindersProps> = ({
     }
   };
 
-  // Run the installment reminder / overdue sweep now (also runs daily at 9 AM).
-  // Sends the approved installment_reminder / installment_overdue Meta templates.
-  const [runningSweep, setRunningSweep] = useState(false);
-  const handleRunInstallmentSweep = async () => {
-    setRunningSweep(true);
-    try {
-      const token = getAccessToken();
-      const headers: HeadersInit = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch(`${API_BASE}/dashboard/run-installment-reminders`, { method: 'POST', headers });
-      const data = await res.json();
-      if (res.ok && data.success) showToast(data.message || 'Installment reminder sweep complete.', 'success');
-      else throw new Error(data.message || 'Sweep failed.');
-    } catch (err: any) {
-      showToast(err.message || 'Sweep failed.', 'error');
-    } finally {
-      setRunningSweep(false);
-    }
-  };
-
   // Bulk send reminder handler
   const handleBulkSendReminders = () => {
     if (selectedStudentIds.length === 0) return;
@@ -225,8 +208,8 @@ const AdminReminders: React.FC<AdminRemindersProps> = ({
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
     if (bulkReminderOption === 'immediate') {
-      // ONE call — the backend runs the shared fee calculation and queues one
-      // approved fee_general_reminder template per student with dues.
+      // ONE call — the backend runs the shared fee calculation for every student
+      // (fee type + amount) and sends one installment_reminder template per student.
       try {
         const r = await fetch(`${API_BASE}/dashboard/send-reminder`, {
           method: 'POST',
@@ -570,20 +553,6 @@ const AdminReminders: React.FC<AdminRemindersProps> = ({
               <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  disabled={runningSweep}
-                  onClick={handleRunInstallmentSweep}
-                  title="Send installment reminders / overdue notices now (approved WhatsApp templates)"
-                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
-                    runningSweep
-                      ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                      : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                  }`}
-                >
-                  <RefreshCw size={13} className={runningSweep ? 'animate-spin' : ''} />
-                  {runningSweep ? 'Running…' : 'Run Installment Reminders'}
-                </button>
-                <button
-                  type="button"
                   disabled={selectedStudentIds.length === 0}
                   onClick={handleBulkSendReminders}
                   className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
@@ -808,7 +777,7 @@ const AdminReminders: React.FC<AdminRemindersProps> = ({
                             <button
                               type="button"
                               disabled={totalDues <= 0}
-                              onClick={() => onCollectFee?.(sId)}
+                              onClick={() => { setSelectedStudentForPayment(sId); setPaymentAmount(''); setPaymentType(s.feePending > 0 ? 'school' : 'books'); }}
                               title={totalDues > 0 ? 'Record Payment & Send Receipt' : 'No dues pending'}
                               className={`flex-1 flex items-center justify-center gap-1.5 h-11 rounded-md text-sm font-bold transition-all ${
                                 totalDues > 0 ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-100 text-slate-300 cursor-not-allowed'

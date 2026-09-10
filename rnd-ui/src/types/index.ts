@@ -324,7 +324,6 @@ export interface HomeworkData {
   description: string;
   dueDate: string;
   attachments: string[];
-  createdBy?: string;
   createdByName: string;
   acknowledgements: HomeworkAck[];
   createdAt?: string;
@@ -367,3 +366,4 @@ export interface HolidayData {
   applicableClasses: string[];
   description?: string;
 }
+

@@ -91,7 +91,7 @@ const AdminStudents: React.FC<AdminStudentsProps> = ({
   const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); onCreateStudent(e); setShowAdmitDrawer(false); };
   const handleSelectStudent = (id: string) => setSelectedStudentIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   const handleSelectAllStudents = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.checked) setSelectedStudentIds(filteredRoster.map(s => s.id || s._id || '').filter(Boolean));
+    if (e.target.checked) setSelectedStudentIds(filteredRoster.map(s => s.id || s._id).filter(Boolean));
     else setSelectedStudentIds([]);
   };
 
@@ -563,12 +563,12 @@ const AdminStudents: React.FC<AdminStudentsProps> = ({
             ) : paginatedRoster.map(s => {
               const [bg, fg] = getAvatarColors(s.name);
               const initials = s.name.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
-              const isSelected = selectedStudentIds.includes(s.id || s._id || '');
+              const isSelected = selectedStudentIds.includes(s.id || s._id);
 
               return (
                 <Tr key={s.id || s._id} className={isSelected ? 'bg-blue-lt/40' : ''}>
                   <Td className="text-center">
-                    <input type="checkbox" className="w-4 h-4 cursor-pointer accent-blue" checked={isSelected} onChange={() => handleSelectStudent(s.id || s._id || '')} />
+                    <input type="checkbox" className="w-4 h-4 cursor-pointer accent-blue" checked={isSelected} onChange={() => handleSelectStudent(s.id || s._id)} />
                   </Td>
                   <Td>
                     <div className="flex items-center gap-2.5">
@@ -627,14 +627,14 @@ const AdminStudents: React.FC<AdminStudentsProps> = ({
         ) : (
           <MobileCardList>
             {paginatedRoster.map(s => {
-              const isSelected = selectedStudentIds.includes(s.id || s._id || '');
+              const isSelected = selectedStudentIds.includes(s.id || s._id);
               return (
                 <MobileRowCard
                   key={s.id || s._id}
                   title={
                     <span className="flex items-center gap-2">
                       <input type="checkbox" className="w-4 h-4 cursor-pointer accent-blue flex-shrink-0"
-                        checked={isSelected} onChange={() => handleSelectStudent(s.id || s._id || '')}
+                        checked={isSelected} onChange={() => handleSelectStudent(s.id || s._id)}
                         onClick={(e) => e.stopPropagation()} />
                       {s.name}
                     </span>

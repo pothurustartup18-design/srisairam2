@@ -249,6 +249,10 @@ const AdminMessages: React.FC<AdminMessagesProps> = ({ students, teachers }) => 
     }, 2000);
   };
 
+  const handleClearMessages = () => {
+    setChatMessages([]);
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
     setAttachedFile(file);

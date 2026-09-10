@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   UserCheck, Plus, Search, Trash2, Eye, Edit, MessageCircle,
-  Lock, Unlock, Check, Users, FolderOpen,
+  Lock, Unlock, Check, Users, AlertTriangle, FolderOpen,
   Paperclip, Loader2, FileText, Phone, Mail, MapPin, X,
   GraduationCap, BookOpen, UserX
 } from 'lucide-react';
@@ -22,6 +22,7 @@ const subjectsList = [
   'Hindi', 'Telugu', 'Art', 'Physical Education', 'Computer Science'
 ];
 
+const GRADE_ORDER = ['NURSERY', 'NUS', 'LKG', 'UKG', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
 const ALL_GRADES  = ['NURSERY', 'LKG', 'UKG', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
 
 interface AdminTeachersProps {
@@ -85,8 +86,10 @@ const AdminTeachers: React.FC<AdminTeachersProps> = ({
     phoneOtpCode,
     setPhoneOtpCode,
     phoneVerified,
+    verifiedPhoneNum,
     sendingOtp,
     verifyingOtp,
+    devOtpCode, // shown in UI when WhatsApp is sandbox-blocked
     handleSendPhoneOtp: handleSendOtp,
     handleVerifyPhoneOtp: handleVerifyOtp,
     resetOtpState,
@@ -98,6 +101,8 @@ const AdminTeachers: React.FC<AdminTeachersProps> = ({
   const [customDocType, setCustomDocType]   = useState('');
   const [uploadingDoc, setUploadingDoc]     = useState(false);
   const [deletingDocId, setDeletingDocId]   = useState<string | null>(null);
+
+  const [expandedRosterId, setExpandedRosterId] = useState<string | null>(null);
 
   // ── Derived metrics ─────────────────────────────────────────────────────────
   const getStatus = (t: TeacherData) => statusToggles[t._id || ''] || t.status || 'active';
@@ -173,7 +178,7 @@ const AdminTeachers: React.FC<AdminTeachersProps> = ({
 
   const handleTeacherFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTeacher.name || !newTeacher.gender || !newTeacher.dob || !newTeacher.phone) { showToast?.('Please fill all required fields.', 'error'); return; }
+    if (!newTeacher.name || !newTeacher.gender || !newTeacher.dob || !newTeacher.phone || !newTeacher.email) { showToast?.('Please fill all required fields.', 'error'); return; }
     if (!phoneVerified) { showToast?.('Please verify the phone number first.', 'error'); return; }
     try {
       const res = await fetch(`${API_BASE}/teachers`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newTeacher) });
@@ -367,6 +372,11 @@ const AdminTeachers: React.FC<AdminTeachersProps> = ({
           </div>
           {phoneOtpSent && !phoneVerified && (
             <>
+              {devOtpCode && (
+                <div className="flex items-center gap-2 px-3 py-2 bg-amber-lt border border-amber-200 rounded-md text-amber-800 text-xs font-semibold mt-1">
+                  <AlertTriangle size={12} /> Dev OTP (Sandbox): <span className="font-mono tracking-widest font-bold">{devOtpCode}</span>
+                </div>
+              )}
               <div className="flex gap-2 mt-1">
                 <input className={cn(inputCls, 'flex-1')} type="text" placeholder="Enter 6-digit OTP"
                   value={phoneOtpCode} onChange={e => setPhoneOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))} />
@@ -391,8 +401,8 @@ const AdminTeachers: React.FC<AdminTeachersProps> = ({
       )}
 
       <div className={fieldCls}>
-        <label className={labelCls}>Email <span className="font-normal text-slate-400 dark:text-slate-500">(optional)</span></label>
-        <input className={inputCls} type="email" placeholder="e.g. alice@school.edu" value={newTeacher.email || ''} onChange={e => onNewTeacherChange('email', e.target.value)} />
+        <label className={labelCls}>Email *</label>
+        <input className={inputCls} type="email" placeholder="e.g. alice@school.edu" required value={newTeacher.email || ''} onChange={e => onNewTeacherChange('email', e.target.value)} />
       </div>
 
       {isEdit && (

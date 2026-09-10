@@ -71,3 +71,6 @@ export const createPermissionTemplate = (name: string, description: string, perm
 
 export const deletePermissionTemplate = (id: string) =>
   jsonFetch(`/settings/permissions/templates/${id}`, { method: 'DELETE' });
+
+export const fetchPermissionAuditLogs = (userId?: string) =>
+  jsonFetch<{ data: any[] }>(`/settings/permission-audit-logs${userId ? `?userId=${userId}` : ''}`).then((r) => r.data);

@@ -11,7 +11,6 @@ import {
   TrendingDown,
   UserCheck,
   ChevronDown,
-  Sparkles,
   Calendar,
   MessageSquare,
   ChevronRight,
@@ -19,6 +18,10 @@ import {
   Car,
   Phone,
   Mail,
+  BookOpen,
+  FileText,
+  Clock,
+  Sparkles,
 } from 'lucide-react';
 import type { StudentData, TeacherData, EventData, StudentExamResult, UserProfile, HomeworkData } from '../../../types';
 import { API_BASE, formatClassName } from '../../../constants';
@@ -48,6 +51,7 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({
   ward,
   allWards,
   onSelectWard,
+  user,
   teachers = [],
   examResults,
   events,
@@ -64,13 +68,11 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({
 
   // ─── Attendance Fetching ──────────────────────────────────────────────────
   const [attendance, setAttendance] = useState<AttendanceSummary | null>(null);
-  const [attendanceLoading, setAttendanceLoading] = useState(false);
 
   useEffect(() => {
     if (!ward) return;
     const studentId = ward.id || ward._id;
     let isMounted = true;
-    setAttendanceLoading(true);
 
     fetch(`${API_BASE}/attendance/summary/student/${studentId}`)
       .then((res) => res.json())
@@ -79,10 +81,7 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({
           setAttendance(data.data);
         }
       })
-      .catch((err) => console.error('Failed to load attendance summary:', err))
-      .finally(() => {
-        if (isMounted) setAttendanceLoading(false);
-      });
+      .catch((err) => console.error('Failed to load attendance summary:', err));
 
     return () => {
       isMounted = false;
@@ -179,9 +178,9 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({
 
     let nextDue: string | null = null;
     if (ward.installments && ward.installments.length > 0) {
-      const unpaid = ward.installments.find((inst) => inst.status !== 'paid');
-      if (unpaid) {
-        nextDue = new Date(unpaid.dueDate).toLocaleDateString('en-IN', {
+      const upcoming = ward.installments.find((i) => i.status !== 'paid');
+      if (upcoming) {
+        nextDue = new Date(upcoming.dueDate).toLocaleDateString('en-IN', {
           day: 'numeric',
           month: 'short',
         });
@@ -191,16 +190,87 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({
     return { total, paid, pending, pct, isCleared, nextDue };
   }, [ward]);
 
-  // ─── Attendance Status Helper ─────────────────────────────────────────────
-  const attendanceStatus = useMemo(() => {
-    if (!attendance || attendance.workingDays === 0) return { label: 'No records', color: 'text-slate-400', bg: 'bg-slate-50 border-slate-200' };
-    const pct = attendance.percentage;
-    if (pct >= 90) return { label: 'Good', color: 'text-emerald-700', bg: 'bg-emerald-50 border-emerald-200 text-emerald-700' };
-    if (pct >= 75) return { label: 'Needs Attention', color: 'text-amber-700', bg: 'bg-amber-50 border-amber-200 text-amber-700' };
-    return { label: 'Critical', color: 'text-rose-700', bg: 'bg-rose-50 border-rose-200 text-rose-700' };
-  }, [attendance]);
+  // ─── Action Center Tab State ──────────────────────────────────────────────
+  const [actionTab, setActionTab] = useState<'attention' | 'homework' | 'fees'>('attention');
 
-  // ─── Upcoming Events & Dates ──────────────────────────────────────────────
+  // ─── Attention Items ──────────────────────────────────────────────────────
+  const attentionItems = useMemo(() => {
+    const items: Array<{
+      id: string;
+      type: 'overdue_homework' | 'pending_fee' | 'unread_messages' | 'low_attendance';
+      title: string;
+      subtitle: string;
+      actionText: string;
+      onAction: () => void;
+      amount?: string;
+      icon: React.ElementType;
+      color: string;
+    }> = [];
+
+    // 1. Pending Fee
+    if (!feeMetrics.isCleared && feeMetrics.pending > 0) {
+      items.push({
+        id: 'fee_pending',
+        type: 'pending_fee',
+        title: `₹${feeMetrics.pending.toLocaleString()} Fee Pending`,
+        subtitle: feeMetrics.nextDue ? `Next installment scheduled for ${feeMetrics.nextDue}` : 'Outstanding balance for this academic term.',
+        actionText: 'View Fees',
+        amount: `₹${feeMetrics.pending.toLocaleString()}`,
+        onAction: () => onNavigate('fees'),
+        icon: CreditCard,
+        color: 'text-amber-600 bg-amber-50',
+      });
+    }
+
+    // 2. Low attendance warning
+    if (attendance && attendance.workingDays >= 5 && attendance.percentage < 75) {
+      items.push({
+        id: 'low_att',
+        type: 'low_attendance',
+        title: `Attendance is below minimum threshold (${attendance.percentage}%)`,
+        subtitle: `${attendance.presentDays} of ${attendance.workingDays} working days attended. School guideline requires >= 75%.`,
+        actionText: 'View Log',
+        onAction: () => onNavigate('attendance'),
+        icon: AlertCircle,
+        color: 'text-rose-600 bg-rose-50',
+      });
+    }
+
+    // 3. Overdue homework
+    if (homeworkMetrics.overdue > 0) {
+      const firstOverdue = homeworkMetrics.overdueItems[0];
+      items.push({
+        id: 'hw_overdue',
+        type: 'overdue_homework',
+        title: `${homeworkMetrics.overdue} Homework Assignment${homeworkMetrics.overdue > 1 ? 's' : ''} Overdue`,
+        subtitle: firstOverdue
+          ? `${firstOverdue.subject}: "${firstOverdue.title}"`
+          : 'Submission pending acknowledgment.',
+        actionText: 'Review',
+        onAction: () => onNavigate('homework'),
+        icon: ClipboardList,
+        color: 'text-rose-600 bg-rose-50',
+      });
+    }
+
+    // 4. Unread messages
+    if (unreadMessagesCount > 0) {
+      items.push({
+        id: 'unread_msg',
+        type: 'unread_messages',
+        title: `${unreadMessagesCount} Unread Message${unreadMessagesCount > 1 ? 's' : ''} from School`,
+        subtitle: 'New direct updates from School Administration or Class Teacher.',
+        actionText: 'Read',
+        onAction: () => onNavigate('messages'),
+        icon: MessageSquare,
+        color: 'text-blue-600 bg-blue-50',
+      });
+    }
+
+    return items;
+  }, [homeworkMetrics, feeMetrics, unreadMessagesCount, attendance, onNavigate]);
+
+  // ─── Upcoming Events ──────────────────────────────────────────────────────
   const upcomingEvents = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -214,86 +284,6 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
       .slice(0, 4);
   }, [events]);
-
-  // ─── "Needs Your Attention" Items ─────────────────────────────────────────
-  const attentionItems = useMemo(() => {
-    const items: Array<{
-      id: string;
-      type: 'overdue_homework' | 'pending_fee' | 'unread_messages' | 'low_attendance';
-      priority: 'high' | 'medium' | 'info';
-      title: string;
-      subtitle: string;
-      actionText: string;
-      onAction: () => void;
-      icon: React.ElementType;
-      color: string;
-    }> = [];
-
-    // 1. Overdue homework
-    if (homeworkMetrics.overdue > 0) {
-      const firstOverdue = homeworkMetrics.overdueItems[0];
-      items.push({
-        id: 'hw_overdue',
-        type: 'overdue_homework',
-        priority: 'high',
-        title: `${homeworkMetrics.overdue} Homework Assignment${homeworkMetrics.overdue > 1 ? 's' : ''} Overdue`,
-        subtitle: firstOverdue
-          ? `${firstOverdue.subject}: "${firstOverdue.title}" (Due ${new Date(firstOverdue.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })})`
-          : 'Requires submission / acknowledgment.',
-        actionText: 'Review Homework',
-        onAction: () => onNavigate('homework'),
-        icon: AlertCircle,
-        color: 'text-rose-600 bg-rose-50 border-rose-200',
-      });
-    }
-
-    // 2. Pending Fee
-    if (!feeMetrics.isCleared && feeMetrics.pending > 0) {
-      items.push({
-        id: 'fee_pending',
-        type: 'pending_fee',
-        priority: 'medium',
-        title: `₹${feeMetrics.pending.toLocaleString()} Fee Payment Pending`,
-        subtitle: feeMetrics.nextDue ? `Next installment scheduled for ${feeMetrics.nextDue}` : 'Outstanding balance for this academic term.',
-        actionText: 'View Fee Details',
-        onAction: () => onNavigate('fees'),
-        icon: CreditCard,
-        color: 'text-amber-700 bg-amber-50 border-amber-200',
-      });
-    }
-
-    // 3. Unread messages
-    if (unreadMessagesCount > 0) {
-      items.push({
-        id: 'unread_msg',
-        type: 'unread_messages',
-        priority: 'medium',
-        title: `${unreadMessagesCount} Unread Message${unreadMessagesCount > 1 ? 's' : ''} from School`,
-        subtitle: 'New communication from Administration or Class Teacher.',
-        actionText: 'Read Messages',
-        onAction: () => onNavigate('messages'),
-        icon: MessageSquare,
-        color: 'text-indigo-700 bg-indigo-50 border-indigo-200',
-      });
-    }
-
-    // 4. Low attendance warning
-    if (attendance && attendance.workingDays >= 5 && attendance.percentage < 75) {
-      items.push({
-        id: 'low_att',
-        type: 'low_attendance',
-        priority: 'high',
-        title: `Attendance is below minimum threshold (${attendance.percentage}%)`,
-        subtitle: `${attendance.presentDays} of ${attendance.workingDays} working days attended. School policy recommends at least 75%.`,
-        actionText: 'Check Attendance Log',
-        onAction: () => onNavigate('attendance'),
-        icon: AlertCircle,
-        color: 'text-rose-600 bg-rose-50 border-rose-200',
-      });
-    }
-
-    return items;
-  }, [homeworkMetrics, feeMetrics, unreadMessagesCount, attendance, onNavigate]);
 
   if (!ward) {
     return (
@@ -337,494 +327,560 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({
     ward.classTeacherEmail ||
     classTeacher?.email ||
     (typeof ward.classTeacher === 'object' ? ward.classTeacher?.email : undefined);
-  const teacherSubjects = classTeacher?.subjects && classTeacher.subjects.length > 0 ? classTeacher.subjects.join(', ') : null;
 
   return (
-    <div className="flex flex-col gap-4 font-sans text-slate-900">
-      {/* ─── Hero Header & Child Identity ─── */}
-      <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
-        <div className="h-1 w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-500" />
-        
-        <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5 min-w-0">
-            {/* Student Avatar */}
-            <div
-              className="w-12 h-12 rounded-xl flex items-center justify-center text-base font-extrabold flex-shrink-0 shadow-xs"
-              style={{ background: bg, color: fg }}
-            >
-              {getInitials(ward.name)}
-            </div>
-
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-slate-500">{greeting} 👋</span>
-              </div>
-              <h1 className="text-lg font-bold text-slate-900 tracking-tight truncate m-0">
-                {ward.name}
-              </h1>
-              <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500 flex-wrap">
-                <span className="font-semibold text-slate-700">{formatClassName(ward.class, ward.section)}</span>
-                <span>·</span>
-                <span>Adm: <strong className="text-slate-700">{ward.admissionNo}</strong></span>
-                {ward.rollNumber && (
-                  <>
-                    <span>·</span>
-                    <span>Roll #{ward.rollNumber}</span>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Child Switcher (if multi-child) OR quick badges */}
-          <div className="flex items-center gap-2 flex-wrap sm:justify-end">
-            {allWards.length > 1 ? (
-              <div className="relative">
-                <select
-                  className="h-8 pl-3 pr-8 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 bg-white outline-none focus:border-blue-500 transition-colors appearance-none cursor-pointer shadow-2xs"
-                  value={ward.id || ward._id}
-                  onChange={(e) => onSelectWard(e.target.value)}
-                >
-                  {allWards.map((w) => (
-                    <option key={w.id || w._id} value={w.id || w._id}>
-                      {w.name} ({formatClassName(w.class, w.section)})
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-              </div>
-            ) : (
-              <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-lg px-2.5 py-1">
-                <UserCheck size={12} /> {classTeacherName}
-                {teacherPhone && (
-                  <a href={`tel:${teacherPhone}`} className="text-emerald-700 font-bold hover:underline flex items-center gap-0.5">
-                    · <Phone size={10} className="text-emerald-600 inline" /> {teacherPhone}
-                  </a>
-                )}
-              </span>
-            )}
-
-            <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-slate-50 text-slate-600 border border-slate-200 rounded-lg px-2.5 py-1">
-              {ward.transportMode === 'school' ? <><Bus size={11} /> School Bus</> : <><Car size={11} /> Private</>}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* ─── Class Teacher & Faculty Support Card ─── */}
-      <div className="bg-white border border-slate-200 rounded-xl p-3.5 sm:p-4 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3.5">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center justify-center text-xs font-extrabold flex-shrink-0">
-            {getInitials(classTeacherName)}
-          </div>
-          <div className="min-w-0">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              Class Teacher · {formatClassName(ward.class, ward.section)}
-            </div>
-            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-              <span className="text-sm font-bold text-slate-900">{classTeacherName}</span>
-              {teacherPhone && (
-                <a
-                  href={`tel:${teacherPhone}`}
-                  className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-0.5 hover:bg-emerald-100 transition-colors"
-                  title="Call Class Teacher"
-                >
-                  <Phone size={11} className="text-emerald-600" />
-                  {teacherPhone}
-                </a>
-              )}
-            </div>
-            <div className="flex items-center gap-3 mt-1 text-xs text-slate-500 flex-wrap">
-              {teacherEmail && (
-                <span className="flex items-center gap-1 text-slate-500">
-                  <Mail size={11} className="text-indigo-500" /> {teacherEmail}
-                </span>
-              )}
-              {teacherSubjects && (
-                <span className="text-slate-400">
-                  Subjects: {teacherSubjects}
-                </span>
-              )}
-            </div>
-          </div>
+    <div className="flex flex-col gap-5 font-sans text-slate-900">
+      {/* ─── PAGE HEADER (Matches Admin Dashboard) ─── */}
+      <div className="flex items-start justify-between gap-4 flex-wrap bg-white border border-slate-200 rounded-xl px-6 py-5 shadow-card">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-3 m-0">
+            {greeting}, {user?.name?.split(' ')[0] || 'Parent'}
+          </h2>
+          <p className="text-sm text-slate-500 mt-1">
+            {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })} · {ward.name} · {formatClassName(ward.class, ward.section)} · Adm: {ward.admissionNo}
+          </p>
         </div>
 
-        <div className="flex items-center gap-2 flex-shrink-0 w-full sm:w-auto">
-          {teacherPhone && (
-            <a
-              href={`tel:${teacherPhone}`}
-              className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors"
-            >
-              <Phone size={12} className="text-emerald-600" /> Call
-            </a>
+        <div className="flex items-center gap-2.5 flex-wrap">
+          {allWards.length > 1 && (
+            <div className="relative">
+              <select
+                className="h-9 pl-3 pr-8 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 bg-white outline-none focus:border-blue-600 transition-colors appearance-none cursor-pointer shadow-2xs"
+                value={ward.id || ward._id}
+                onChange={(e) => onSelectWard(e.target.value)}
+              >
+                {allWards.map((w) => (
+                  <option key={w.id || w._id} value={w.id || w._id}>
+                    {w.name} ({formatClassName(w.class, w.section)})
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            </div>
           )}
+
           <button
             type="button"
-            onClick={() => onNavigate('messages')}
-            className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-lg bg-indigo-600 text-xs font-bold text-white hover:bg-indigo-700 transition-colors shadow-2xs cursor-pointer"
+            onClick={() => onNavigate('messages:teacher')}
+            className="flex items-center gap-1.5 h-9 px-3.5 rounded-lg border border-slate-200 bg-white text-slate-700 text-xs font-semibold hover:bg-slate-50 transition-colors cursor-pointer"
           >
-            <MessageSquare size={12} /> Message Teacher
+            <MessageSquare size={13} className="text-slate-500" />
+            Message Teacher
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onNavigate('fees')}
+            className="flex items-center gap-1.5 h-9 px-4 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 transition-colors cursor-pointer shadow-sm"
+          >
+            <CreditCard size={13} />
+            Fee Details
           </button>
         </div>
       </div>
 
-      {/* ─── Quick Status Overview Cards ─── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      {/* ─── 4 KPI STAT CARDS (Matches Admin Design) ─── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* 1. Attendance Card */}
         <div
           onClick={() => onNavigate('attendance')}
-          className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all cursor-pointer group flex flex-col justify-between"
+          className="bg-white border border-slate-200 rounded-xl p-4 shadow-card flex flex-col justify-between hover:border-slate-300 transition-colors cursor-pointer"
         >
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Attendance</span>
-            <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
-              <CalendarCheck size={13} />
+          <div className="flex items-center justify-between">
+            <div className="w-9 h-9 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-xs font-bold">
+              <CalendarCheck size={18} />
             </div>
-          </div>
-          <div className="my-2">
-            <div className="text-xl font-extrabold text-slate-900 tracking-tight">
-              {attendanceLoading ? (
-                <span className="text-sm font-normal text-slate-400">Loading…</span>
-              ) : attendance ? (
-                `${attendance.percentage}%`
-              ) : (
-                '—'
+            <span
+              className={cn(
+                'text-xs font-bold px-2 py-0.5 rounded-full',
+                (attendance?.percentage || 0) >= 75
+                  ? 'bg-emerald-50 text-emerald-700'
+                  : 'bg-rose-50 text-rose-700'
               )}
-            </div>
-            <div className="text-[11px] text-slate-500 mt-0.5">
-              {attendance ? `${attendance.presentDays} / ${attendance.workingDays} days present` : 'Track daily record'}
-            </div>
-          </div>
-          <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-            <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full border', attendanceStatus.bg)}>
-              {attendanceStatus.label}
+            >
+              {(attendance?.percentage || 0) >= 75 ? '✓ On Track' : '⚠️ Critical'}
             </span>
-            <ArrowRight size={12} className="text-slate-300 group-hover:text-blue-600 group-hover:translate-x-0.5 transition-all" />
+          </div>
+          <div className="mt-3">
+            <div className="text-xs font-semibold text-slate-500">Overall Attendance</div>
+            <div className="text-2xl font-extrabold text-slate-900 mt-0.5">
+              {attendance ? `${attendance.percentage}%` : '—'}
+            </div>
+            <div className="text-xs text-slate-400 mt-1">
+              {attendance ? `${attendance.presentDays}/${attendance.workingDays} days present` : 'Calculating sessions…'}
+            </div>
           </div>
         </div>
 
-        {/* 2. Academic Performance Card */}
+        {/* 2. Academic Score */}
         <div
           onClick={() => onNavigate('results')}
-          className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all cursor-pointer group flex flex-col justify-between"
+          className="bg-white border border-slate-200 rounded-xl p-4 shadow-card flex flex-col justify-between hover:border-slate-300 transition-colors cursor-pointer"
         >
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Academic Score</span>
-            <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-              <GraduationCap size={14} />
+          <div className="flex items-center justify-between">
+            <div className="w-9 h-9 rounded-full bg-purple-50 text-purple-600 flex items-center justify-center text-xs font-bold">
+              <GraduationCap size={18} />
             </div>
-          </div>
-          <div className="my-2">
-            <div className="text-xl font-extrabold text-slate-900 tracking-tight">
-              {academicMetrics.latestPct !== null ? `${academicMetrics.latestPct}%` : '—'}
-            </div>
-            <div className="text-[11px] text-slate-500 mt-0.5 truncate">
-              {academicMetrics.latestExam ? academicMetrics.latestExam.examName : 'No published exams'}
-            </div>
-          </div>
-          <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-            {academicMetrics.diff !== null ? (
+            {academicMetrics.diff !== null && (
               <span
                 className={cn(
-                  'text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-0.5',
-                  academicMetrics.diff >= 0
-                    ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
-                    : 'text-rose-700 bg-rose-50 border-rose-200'
+                  'text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-0.5',
+                  academicMetrics.diff >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
                 )}
               >
-                {academicMetrics.diff >= 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                {academicMetrics.diff >= 0 ? `+${academicMetrics.diff}%` : `${academicMetrics.diff}%`}
+                {academicMetrics.diff >= 0 ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
+                {Math.abs(academicMetrics.diff)}%
               </span>
-            ) : (
-              <span className="text-[10px] font-medium text-slate-400">Recent result</span>
             )}
-            <ArrowRight size={12} className="text-slate-300 group-hover:text-indigo-600 group-hover:translate-x-0.5 transition-all" />
+          </div>
+          <div className="mt-3">
+            <div className="text-xs font-semibold text-slate-500">Academic Score</div>
+            <div className="text-2xl font-extrabold text-slate-900 mt-0.5">
+              {academicMetrics.latestPct !== null ? `${academicMetrics.latestPct}%` : 'N/A'}
+            </div>
+            <div className="text-xs text-slate-400 mt-1 truncate">
+              {academicMetrics.latestExam ? `${academicMetrics.latestExam.examName} (Latest)` : 'No exam published'}
+            </div>
           </div>
         </div>
 
-        {/* 3. Homework Card */}
+        {/* 3. Fee Status */}
         <div
-          onClick={() => onNavigate('homework')}
-          className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all cursor-pointer group flex flex-col justify-between"
+          onClick={() => onNavigate('fees')}
+          className="bg-white border border-slate-200 rounded-xl p-4 shadow-card flex flex-col justify-between hover:border-slate-300 transition-colors cursor-pointer"
         >
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Homework</span>
-            <div className="w-7 h-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center group-hover:bg-amber-600 group-hover:text-white transition-colors">
-              <ClipboardList size={13} />
+          <div className="flex items-center justify-between">
+            <div className="w-9 h-9 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center text-xs font-bold">
+              <CreditCard size={18} />
+            </div>
+            <span
+              className={cn(
+                'text-xs font-bold px-2 py-0.5 rounded-full',
+                feeMetrics.isCleared ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'
+              )}
+            >
+              {feeMetrics.isCleared ? '✓ Cleared' : 'Pending Due'}
+            </span>
+          </div>
+          <div className="mt-3">
+            <div className="text-xs font-semibold text-slate-500">Fee Status</div>
+            <div
+              className={cn(
+                'text-2xl font-extrabold mt-0.5',
+                feeMetrics.isCleared ? 'text-emerald-600' : 'text-slate-900'
+              )}
+            >
+              {feeMetrics.isCleared ? '₹0' : `₹${feeMetrics.pending.toLocaleString()}`}
+            </div>
+            <div className="text-xs text-slate-400 mt-1">
+              {feeMetrics.isCleared ? 'Full term fees paid' : `${feeMetrics.pct}% paid of total`}
             </div>
           </div>
-          <div className="my-2">
-            <div className="text-xl font-extrabold text-slate-900 tracking-tight">
-              {homeworkMetrics.pending + homeworkMetrics.overdue}
-              <span className="text-xs font-semibold text-slate-400 ml-1">due</span>
+        </div>
+
+        {/* 4. Homework Status */}
+        <div
+          onClick={() => onNavigate('homework')}
+          className="bg-white border border-slate-200 rounded-xl p-4 shadow-card flex flex-col justify-between hover:border-slate-300 transition-colors cursor-pointer"
+        >
+          <div className="flex items-center justify-between">
+            <div className="w-9 h-9 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center text-xs font-bold">
+              <ClipboardList size={18} />
             </div>
-            <div className="text-[11px] text-slate-500 mt-0.5">
+            <span
+              className={cn(
+                'text-xs font-bold px-2 py-0.5 rounded-full',
+                homeworkMetrics.overdue === 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+              )}
+            >
+              {homeworkMetrics.overdue === 0 ? 'All on track' : `${homeworkMetrics.overdue} Overdue`}
+            </span>
+          </div>
+          <div className="mt-3">
+            <div className="text-xs font-semibold text-slate-500">Homework &amp; Tasks</div>
+            <div className="text-2xl font-extrabold text-slate-900 mt-0.5">
+              {homeworkMetrics.pending} Due
+            </div>
+            <div className="text-xs text-slate-400 mt-1">
               {homeworkMetrics.completed} acknowledged
             </div>
           </div>
-          <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-            {homeworkMetrics.overdue > 0 ? (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-rose-50 border-rose-200 text-rose-700">
-                {homeworkMetrics.overdue} overdue
-              </span>
-            ) : (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-emerald-50 border-emerald-200 text-emerald-700">
-                All on track
-              </span>
-            )}
-            <ArrowRight size={12} className="text-slate-300 group-hover:text-amber-600 group-hover:translate-x-0.5 transition-all" />
-          </div>
-        </div>
-
-        {/* 4. Fees Card */}
-        <div
-          onClick={() => onNavigate('fees')}
-          className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all cursor-pointer group flex flex-col justify-between"
-        >
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Fee Status</span>
-            <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-              <CreditCard size={13} />
-            </div>
-          </div>
-          <div className="my-2">
-            <div className="text-xl font-extrabold text-slate-900 tracking-tight">
-              {feeMetrics.pending > 0 ? `₹${feeMetrics.pending.toLocaleString()}` : 'Cleared ✓'}
-            </div>
-            <div className="text-[11px] text-slate-500 mt-0.5">
-              {feeMetrics.pct}% paid of total
-            </div>
-          </div>
-          <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-            <span
-              className={cn(
-                'text-[10px] font-bold px-2 py-0.5 rounded-full border',
-                feeMetrics.isCleared
-                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                  : 'bg-amber-50 border-amber-200 text-amber-800'
-              )}
-            >
-              {feeMetrics.isCleared ? 'Fully Paid' : 'Pending Due'}
-            </span>
-            <ArrowRight size={12} className="text-slate-300 group-hover:text-emerald-600 group-hover:translate-x-0.5 transition-all" />
-          </div>
         </div>
       </div>
 
-      {/* ─── "Needs Your Attention" Smart Section ─── */}
-      <div className="bg-white border border-slate-200 rounded-xl shadow-2xs overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50/70">
-          <div className="flex items-center gap-2">
-            <Sparkles size={14} className="text-indigo-600" />
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700 m-0">Needs Your Attention</h2>
-          </div>
-          {attentionItems.length > 0 && (
-            <span className="text-[10px] font-bold px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full">
-              {attentionItems.length} Action{attentionItems.length !== 1 ? 's' : ''}
-            </span>
-          )}
-        </div>
-
-        <div className="p-3">
-          {attentionItems.length === 0 ? (
-            <div className="flex items-center gap-3 p-3 bg-emerald-50/70 border border-emerald-100 rounded-lg text-emerald-800">
-              <CheckCircle2 size={18} className="text-emerald-600 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="text-xs font-bold text-emerald-900">You're all caught up! 🎉</div>
-                <div className="text-[11px] text-emerald-700 mt-0.5">
-                  No overdue homework, outstanding urgent dues, or unread notices for {ward.name}.
-                </div>
+      {/* ─── MAIN 2-COLUMN BALANCED GRID (Matches Admin Grid) ─── */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-5">
+        {/* ─── LEFT COLUMN ─── */}
+        <div className="flex flex-col gap-5">
+          {/* Action Center Card */}
+          <div className="bg-white border border-slate-200 rounded-xl shadow-card overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 bg-slate-50/50">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 m-0">Action Center</h3>
+                <p className="text-xs text-slate-500 m-0 mt-0.5">Important items requiring your review or payment</p>
               </div>
+              <button
+                type="button"
+                onClick={() => onNavigate('fees')}
+                className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer bg-transparent border-0"
+              >
+                View all <ArrowRight size={12} />
+              </button>
             </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              {attentionItems.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <div
-                    key={item.id}
-                    onClick={item.onAction}
+
+            {/* Tab bar */}
+            <div className="px-5 pt-3">
+              <div className="flex gap-1 bg-slate-100 rounded-lg p-1 overflow-x-auto">
+                {[
+                  { key: 'attention' as const, label: 'Needs Attention', count: attentionItems.length },
+                  { key: 'fees' as const, label: 'Fee Dues', count: feeMetrics.isCleared ? 0 : 1 },
+                  { key: 'homework' as const, label: 'Homework', count: homeworkMetrics.pending },
+                ].map((t) => (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => setActionTab(t.key)}
                     className={cn(
-                      'flex items-center justify-between gap-3 p-3 rounded-lg border transition-all cursor-pointer hover:shadow-2xs group',
-                      item.color
+                      'flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md transition-colors whitespace-nowrap cursor-pointer border-0',
+                      actionTab === t.key
+                        ? 'bg-white text-slate-900 shadow-2xs'
+                        : 'text-slate-500 hover:text-slate-800 bg-transparent'
                     )}
                   >
-                    <div className="flex items-start gap-2.5 min-w-0">
-                      <Icon size={16} className="flex-shrink-0 mt-0.5" />
-                      <div className="min-w-0">
-                        <div className="text-xs font-bold leading-snug">{item.title}</div>
-                        <div className="text-[11px] opacity-80 mt-0.5 leading-snug truncate">{item.subtitle}</div>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      className="text-xs font-bold flex items-center gap-1 flex-shrink-0 opacity-90 group-hover:opacity-100 underline decoration-1 underline-offset-2"
+                    {t.label}
+                    <span
+                      className={cn(
+                        'text-[10px] font-extrabold px-1.5 py-0.5 rounded-full',
+                        actionTab === t.key ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600'
+                      )}
                     >
-                      {item.actionText} <ChevronRight size={12} />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ─── 2-Column Grid: Academic Snapshot & Upcoming Schedule ─── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Left: Academic Subject Highlights */}
-        <div className="bg-white border border-slate-200 rounded-xl shadow-2xs overflow-hidden flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50/70">
-              <div className="flex items-center gap-2">
-                <GraduationCap size={14} className="text-indigo-600" />
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 m-0">Recent Academic Performance</h3>
+                      {t.count}
+                    </span>
+                  </button>
+                ))}
               </div>
-              <button
-                onClick={() => onNavigate('results')}
-                className="text-[11px] font-bold text-blue-600 hover:text-blue-800 transition-colors flex items-center gap-0.5"
-              >
-                All Exams <ChevronRight size={12} />
-              </button>
             </div>
 
-            <div className="p-4">
-              {academicMetrics.latestExam ? (
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-sm font-bold text-slate-800">{academicMetrics.latestExam.examName}</div>
-                      <div className="text-[11px] text-slate-400">
-                        Score: {academicMetrics.latestExam.totalObtained} / {academicMetrics.latestExam.totalPossible}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-base font-extrabold text-slate-900">{academicMetrics.latestPct}%</span>
-                    </div>
+            {/* Tab content list */}
+            <div className="px-5 py-3 flex flex-col divide-y divide-slate-100 max-h-[380px] overflow-y-auto">
+              {actionTab === 'attention' && (
+                attentionItems.length === 0 ? (
+                  <div className="py-8 text-center text-slate-400 text-xs font-medium">
+                    🎉 Everything is in good standing! No urgent items pending.
                   </div>
-
-                  {/* Subject progress list */}
-                  <div className="flex flex-col gap-2 pt-1 border-t border-slate-100">
-                    {academicMetrics.subjectMarks.slice(0, 4).map((sub) => {
-                      const maxMark = academicMetrics.latestExam?.subjects.find((s) => s.name === sub.subject)?.totalMarks || 100;
-                      const subPct = maxMark > 0 ? Math.round((sub.obtainedMarks / maxMark) * 100) : 0;
-                      const barColor = subPct >= 75 ? 'bg-emerald-500' : subPct >= 50 ? 'bg-blue-500' : subPct >= 35 ? 'bg-amber-500' : 'bg-rose-500';
-
-                      return (
-                        <div key={sub.subject} className="flex flex-col gap-1">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="font-semibold text-slate-700">{sub.subject}</span>
-                            <span className="text-slate-500 font-medium">{sub.obtainedMarks} / {maxMark}</span>
-                          </div>
-                          <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                            <div className={cn('h-full rounded-full transition-all', barColor)} style={{ width: `${subPct}%` }} />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : (
-                <div className="py-6 text-center text-slate-400 text-xs">
-                  No published exam results available yet.
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="p-3 bg-slate-50 border-t border-slate-100 text-center">
-            <button
-              onClick={() => onNavigate('results')}
-              className="text-xs font-bold text-blue-600 hover:text-blue-800 transition-colors inline-flex items-center gap-1"
-            >
-              View Detailed Marksheets & Report Cards <ArrowRight size={12} />
-            </button>
-          </div>
-        </div>
-
-        {/* Right: Upcoming Events & Dates */}
-        <div className="bg-white border border-slate-200 rounded-xl shadow-2xs overflow-hidden flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50/70">
-              <div className="flex items-center gap-2">
-                <Calendar size={14} className="text-indigo-600" />
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 m-0">Upcoming Events & Notices</h3>
-              </div>
-              <button
-                onClick={() => onNavigate('notices')}
-                className="text-[11px] font-bold text-blue-600 hover:text-blue-800 transition-colors flex items-center gap-0.5"
-              >
-                View All <ChevronRight size={12} />
-              </button>
-            </div>
-
-            <div className="p-3">
-              {upcomingEvents.length > 0 ? (
-                <div className="flex flex-col gap-2">
-                  {upcomingEvents.map((ev) => {
-                    const evDate = new Date(ev.date);
+                ) : (
+                  attentionItems.map((item) => {
+                    const Icon = item.icon;
                     return (
-                      <div
-                        key={ev._id}
-                        onClick={() => onNavigate('notices')}
-                        className="flex items-start gap-3 p-2.5 rounded-lg border border-slate-100 bg-slate-50/60 hover:bg-slate-100/70 transition-colors cursor-pointer"
-                      >
-                        <div className="w-10 h-10 rounded-lg bg-blue-50 border border-blue-100 flex flex-col items-center justify-center flex-shrink-0 text-blue-800">
-                          <span className="text-[9px] font-bold uppercase">{evDate.toLocaleDateString('en-IN', { month: 'short' })}</span>
-                          <span className="text-xs font-extrabold leading-none">{evDate.getDate()}</span>
+                      <div key={item.id} className="flex items-center gap-3 py-3.5 first:pt-2 last:pb-2">
+                        <div className={cn('w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 text-xs', item.color)}>
+                          <Icon size={16} />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="text-xs font-bold text-slate-800 truncate">{ev.title}</div>
-                          <div className="text-[11px] text-slate-400 mt-0.5 line-clamp-1">{ev.description || 'School event announcement'}</div>
+                          <div className="text-xs font-bold text-slate-900 truncate">{item.title}</div>
+                          <div className="text-[11px] text-slate-500 truncate mt-0.5">{item.subtitle}</div>
+                        </div>
+                        <div className="flex items-center gap-2.5 flex-shrink-0">
+                          {item.amount && (
+                            <span className="text-xs font-extrabold text-slate-900">{item.amount}</span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={item.onAction}
+                            className="flex items-center gap-1 h-8 px-3 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 transition-colors cursor-pointer"
+                          >
+                            {item.actionText}
+                          </button>
                         </div>
                       </div>
                     );
-                  })}
-                </div>
-              ) : (
-                <div className="py-6 text-center text-slate-400 text-xs">
-                  No upcoming school events scheduled.
-                </div>
+                  })
+                )
+              )}
+
+              {actionTab === 'fees' && (
+                feeMetrics.isCleared ? (
+                  <div className="py-8 text-center text-slate-400 text-xs font-medium">
+                    ✅ All fees are fully paid! No outstanding dues.
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between py-3.5">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-full bg-amber-50 text-amber-700 flex items-center justify-center flex-shrink-0">
+                        <CreditCard size={16} />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-slate-900">Term Academic Dues</div>
+                        <div className="text-[11px] text-slate-500 mt-0.5">Due for current academic semester</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-extrabold text-rose-600">₹{feeMetrics.pending.toLocaleString()}</span>
+                      <button
+                        type="button"
+                        onClick={() => onNavigate('fees')}
+                        className="h-8 px-3 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 transition-colors cursor-pointer"
+                      >
+                        View Details
+                      </button>
+                    </div>
+                  </div>
+                )
+              )}
+
+              {actionTab === 'homework' && (
+                homeworkList.length === 0 ? (
+                  <div className="py-8 text-center text-slate-400 text-xs font-medium">
+                    No homework assigned for this week.
+                  </div>
+                ) : (
+                  homeworkList.slice(0, 3).map((h) => (
+                    <div key={h._id} className="flex items-center justify-between py-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center flex-shrink-0 text-xs font-bold">
+                          <BookOpen size={14} />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-slate-900 truncate">{h.title}</div>
+                          <div className="text-[11px] text-slate-500 mt-0.5">{h.subject} · Due {new Date(h.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onNavigate('homework')}
+                        className="text-xs font-bold text-blue-600 hover:text-blue-700 ml-2"
+                      >
+                        View →
+                      </button>
+                    </div>
+                  ))
+                )
               )}
             </div>
           </div>
 
-          <div className="p-3 bg-slate-50 border-t border-slate-100 text-center">
-            <button
-              onClick={() => onNavigate('notices')}
-              className="text-xs font-bold text-blue-600 hover:text-blue-800 transition-colors inline-flex items-center gap-1"
-            >
-              Check School Circulars & Calendar <ArrowRight size={12} />
-            </button>
+          {/* Academic Performance & Marks Breakdown */}
+          <div className="bg-white border border-slate-200 rounded-xl shadow-card p-5">
+            <div className="flex items-center justify-between pb-3.5 border-b border-slate-100">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 m-0">Recent Academic Performance</h3>
+                <p className="text-xs text-slate-500 m-0 mt-0.5">
+                  {academicMetrics.latestExam ? `${academicMetrics.latestExam.examName} · Total: ${academicMetrics.latestExam.totalObtained ?? (academicMetrics.latestExam as any).totalMarks ?? 0}/${academicMetrics.latestExam.totalPossible ?? (academicMetrics.latestExam as any).maxMarks ?? 100} (${academicMetrics.latestPct}%)` : 'No marks recorded yet'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onNavigate('results')}
+                className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer bg-transparent border-0"
+              >
+                All Exams <ArrowRight size={12} />
+              </button>
+            </div>
+
+            {academicMetrics.subjectMarks.length === 0 ? (
+              <div className="py-8 text-center text-slate-400 text-xs">
+                No subject marks published for this term yet.
+              </div>
+            ) : (
+              <div className="mt-4 flex flex-col gap-3.5">
+                {academicMetrics.subjectMarks.map((s: any, idx) => {
+                  const obtained = typeof s.obtainedMarks === 'number' ? s.obtainedMarks : (typeof s.marks === 'number' ? s.marks : (Number(s.obtainedMarks) || 0));
+                  const subDef = academicMetrics.latestExam?.subjects?.find((sub: any) => sub.name === s.subject);
+                  const max = subDef?.totalMarks || (typeof s.maxMarks === 'number' ? s.maxMarks : 100);
+                  const pct = max > 0 ? Math.round((obtained / max) * 100) : 0;
+                  const isGood = pct >= 50;
+                  const barColor =
+                    pct >= 75 ? 'bg-emerald-500' : pct >= 50 ? 'bg-blue-600' : pct >= 35 ? 'bg-amber-500' : 'bg-rose-500';
+
+                  return (
+                    <div key={idx} className="flex flex-col gap-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                          <span className={cn('w-2 h-2 rounded-full', barColor)} />
+                          {s.subject}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-extrabold text-slate-900">{obtained}/{max}</span>
+                          <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded-full', isGood ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700')}>
+                            {pct}%
+                          </span>
+                        </div>
+                      </div>
+                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                        <div className={cn('h-full rounded-full transition-all duration-500', barColor)} style={{ width: `${Math.min(100, Math.max(2, pct))}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Quick Shortcuts */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label: 'Attendance Log', sub: 'Full calendar', icon: CalendarCheck, view: 'attendance', color: 'text-blue-600 bg-blue-50' },
+              { label: 'Exam Results', sub: 'Report cards', icon: GraduationCap, view: 'results', color: 'text-purple-600 bg-purple-50' },
+              { label: 'Fee Receipts', sub: 'Download bills', icon: CreditCard, view: 'fees', color: 'text-emerald-600 bg-emerald-50' },
+              { label: 'School Notices', sub: `${events.length} announcements`, icon: Calendar, view: 'notices', color: 'text-amber-600 bg-amber-50' },
+            ].map((tile) => {
+              const TileIcon = tile.icon;
+              return (
+                <button
+                  key={tile.label}
+                  type="button"
+                  onClick={() => onNavigate(tile.view)}
+                  className="p-3.5 rounded-xl border border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm transition-all flex flex-col items-start text-left cursor-pointer group"
+                >
+                  <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center mb-2.5', tile.color)}>
+                    <TileIcon size={15} />
+                  </div>
+                  <div className="text-xs font-bold text-slate-900 group-hover:text-blue-600 transition-colors">{tile.label}</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">{tile.sub}</div>
+                </button>
+              );
+            })}
           </div>
         </div>
-      </div>
 
-      {/* ─── Quick Access Action Grid ─── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-        {[
-          { label: 'Attendance Log', icon: CalendarCheck, view: 'attendance', color: 'text-blue-600 bg-blue-50' },
-          { label: 'Exam Results', icon: GraduationCap, view: 'results', color: 'text-indigo-600 bg-indigo-50' },
-          { label: 'Homework Board', icon: ClipboardList, view: 'homework', color: 'text-amber-600 bg-amber-50' },
-          { label: 'Fee Breakdown', icon: CreditCard, view: 'fees', color: 'text-emerald-600 bg-emerald-50' },
-        ].map((item) => {
-          const Icon = item.icon;
-          return (
-            <button
-              key={item.view}
-              type="button"
-              onClick={() => onNavigate(item.view)}
-              className="flex items-center gap-2.5 p-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 transition-all text-left shadow-2xs cursor-pointer group"
-            >
-              <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform', item.color)}>
-                <Icon size={15} />
+        {/* ─── RIGHT COLUMN (Sidebar matching Admin) ─── */}
+        <div className="flex flex-col gap-5">
+          {/* Class Teacher Profile Card */}
+          <div className="bg-white border border-slate-200 rounded-xl shadow-card p-4">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-3">
+              Class Teacher &amp; Support
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center justify-center font-bold text-sm flex-shrink-0">
+                {getInitials(classTeacherName)}
               </div>
-              <span className="text-xs font-bold text-slate-700 group-hover:text-slate-900 transition-colors">
-                {item.label}
+              <div className="min-w-0">
+                <div className="text-sm font-bold text-slate-900 truncate">{classTeacherName}</div>
+                <div className="text-xs text-slate-500 truncate mt-0.5">
+                  Class Teacher · {formatClassName(ward.class, ward.section)}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3.5 flex flex-col gap-2">
+              {teacherPhone && (
+                <a
+                  href={`tel:${teacherPhone}`}
+                  className="flex items-center justify-center gap-2 h-8 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 text-xs font-semibold hover:bg-slate-100 transition-colors"
+                >
+                  <Phone size={12} className="text-emerald-600" /> {teacherPhone}
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={() => onNavigate('messages:teacher')}
+                className="flex items-center justify-center gap-2 h-8 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 transition-colors cursor-pointer"
+              >
+                <MessageSquare size={12} /> Direct Message
+              </button>
+            </div>
+          </div>
+
+          {/* Attendance Trend Widget */}
+          <div className="bg-white border border-slate-200 rounded-xl shadow-card p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs font-bold text-slate-800">Attendance Overview</div>
+                <div className="text-[11px] text-slate-400">Current Academic Term</div>
+              </div>
+              <span className="text-sm font-extrabold text-blue-600">
+                {attendance ? `${attendance.percentage}%` : '—'}
               </span>
-            </button>
-          );
-        })}
+            </div>
+
+            {/* Sparkline Graphic */}
+            <div className="mt-3 h-14 w-full">
+              <svg viewBox="0 0 100 35" className="w-full h-full overflow-visible">
+                <defs>
+                  <linearGradient id="parentAttGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#2563eb" stopOpacity="0.25" />
+                    <stop offset="100%" stopColor="#2563eb" stopOpacity="0.0" />
+                  </linearGradient>
+                </defs>
+                <path
+                  d="M0,28 Q15,25 30,18 T60,20 T85,12 T100,8 L100,35 L0,35 Z"
+                  fill="url(#parentAttGrad)"
+                />
+                <path
+                  d="M0,28 Q15,25 30,18 T60,20 T85,12 T100,8"
+                  fill="none"
+                  stroke="#2563eb"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 mt-2 pt-2.5 border-t border-slate-100 text-center">
+              <div className="bg-slate-50 rounded-lg p-2">
+                <div className="text-[10px] font-bold text-slate-400 uppercase">Present</div>
+                <div className="text-sm font-extrabold text-emerald-600 mt-0.5">
+                  {attendance?.presentDays || 0} Days
+                </div>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-2">
+                <div className="text-[10px] font-bold text-slate-400 uppercase">Absent</div>
+                <div className="text-sm font-extrabold text-rose-600 mt-0.5">
+                  {(attendance?.workingDays || 0) - (attendance?.presentDays || 0)} Days
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* School Events & Circulars */}
+          <div className="bg-white border border-slate-200 rounded-xl shadow-card p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-xs font-bold text-slate-800">School Notices &amp; Events</div>
+              <button
+                type="button"
+                onClick={() => onNavigate('notices')}
+                className="text-[11px] font-bold text-blue-600 hover:text-blue-700 cursor-pointer bg-transparent border-0"
+              >
+                View all →
+              </button>
+            </div>
+
+            {upcomingEvents.length === 0 ? (
+              <div className="py-6 text-center text-slate-400 text-xs">
+                No upcoming school events scheduled.
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2.5">
+                {upcomingEvents.map((ev) => {
+                  const d = new Date(ev.date);
+                  return (
+                    <div
+                      key={ev._id}
+                      onClick={() => onNavigate('notices')}
+                      className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer"
+                    >
+                      <div className="w-9 h-9 rounded-lg bg-blue-50 border border-blue-100 flex flex-col items-center justify-center flex-shrink-0 leading-none">
+                        <span className="text-[9px] font-extrabold text-blue-600 uppercase">
+                          {d.toLocaleDateString('en-IN', { month: 'short' })}
+                        </span>
+                        <span className="text-xs font-extrabold text-slate-900 mt-0.5">
+                          {d.getDate()}
+                        </span>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-bold text-slate-900 truncate">{ev.title}</div>
+                        <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                          {d.toLocaleDateString('en-IN', { weekday: 'short' })}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

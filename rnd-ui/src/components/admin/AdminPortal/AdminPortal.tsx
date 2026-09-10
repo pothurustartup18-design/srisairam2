@@ -1,12 +1,12 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import jsPDF from 'jspdf';
-import QRCode from 'qrcode';
 import { Search, Sun, Moon, Bell, MessageCircle, Check, Menu } from 'lucide-react';
 
 import Toast from '../../shared/Toast/Toast';
 import { AdminSidebar } from '../../shared/Sidebars/Sidebars';
 import MessageComposer from '../../shared/MessageComposer/MessageComposer';
 import { useMessageComposer } from '../../../hooks/useMessageComposer';
+import ErrorBoundary from '../../shared/ErrorBoundary/ErrorBoundary';
 const AdminDashboard = lazy(() => import('../AdminDashboard/AdminDashboard'));
 const AdminFeeAnalytics = lazy(() => import('../AdminFeeAnalytics/AdminFeeAnalytics'));
 const AdminTeachers = lazy(() => import('../AdminTeachers/AdminTeachers'));
@@ -64,7 +64,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [toast, setToast] = useState<ToastState>({ show: false, message: '', type: 'success' });
   const { hasPermission } = useAuth();
- 
+
   // Redirect if user has no permission for current activeView
   useEffect(() => {
     const viewPermissions: Record<AdminView, string | null> = {
@@ -85,12 +85,12 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
       'expenditures': 'expenditure:view',
       'profile': null
     };
- 
+
     const requiredPerm = viewPermissions[activeView];
     if (requiredPerm && !hasPermission(requiredPerm)) {
       const keys: AdminView[] = [
-        'dashboard', 'fee-analytics', 'teachers', 'students', 'attendance', 
-        'marks', 'homework', 'leaves', 'feedbacks', 'messages', 'events', 
+        'dashboard', 'fee-analytics', 'teachers', 'students', 'attendance',
+        'marks', 'homework', 'leaves', 'feedbacks', 'messages', 'events',
         'reminders', 'settings', 'profile', 'expenditures'
       ];
       const fallback = keys.find(k => {
@@ -122,6 +122,17 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
 
   // â”€â”€â”€ Class State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [classesList, setClassesList] = useState<ClassData[]>([]);
+  const [schoolProfile, setSchoolProfile] = useState<any>(null);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/school-profile`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.data) setSchoolProfile(data.data);
+      })
+      .catch(err => console.error('Failed to load school profile:', err));
+  }, []);
+
   const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
   // Default to the collapsed icon rail on tablet widths (768-1023px) so content panes
   // aren't squeezed by a full-width nav.
@@ -164,6 +175,52 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
     const interval = setInterval(fetchWhatsappQuota, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  const handleResetQuotaFromHeader = async () => {
+    const input = window.prompt(
+      'Enter the new WhatsApp message limit (the sent counter will be reset to 0):',
+      String(whatsappLimit)
+    );
+    if (input === null) return; // user cancelled
+    const newLimit = parseInt(input, 10);
+    if (Number.isNaN(newLimit) || newLimit <= 0) {
+      showToast('Please enter a valid positive number.', 'error');
+      return;
+    }
+
+    try {
+      const token = getAccessToken();
+      const headers: HeadersInit = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      // Update limit
+      const resLimit = await fetch(`${API_BASE}/settings/system-config`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ key: 'whatsappLimit', value: newLimit })
+      });
+
+      // Reset count to 0
+      const resCount = await fetch(`${API_BASE}/settings/system-config`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ key: 'whatsappSentCount', value: 0 })
+      });
+
+      const dataLimit = await resLimit.json();
+      const dataCount = await resCount.json();
+
+      if (resLimit.ok && resCount.ok && dataLimit.success && dataCount.success) {
+        showToast(`WhatsApp limit set to ${newLimit} and counter reset to 0.`, 'success');
+        setWhatsappSentCount(0);
+        setWhatsappLimit(newLimit);
+      } else {
+        showToast('Failed to update quota settings.', 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error updating quota settings.', 'error');
+    }
+  };
 
   // â”€â”€â”€ Leave State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [leavesList, setLeavesList] = useState<LeaveData[]>([]);
@@ -308,7 +365,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
   const [messageTarget, setMessageTarget] = useState<StudentData | null>(null);
   const [messageTeachersTarget, setMessageTeachersTarget] = useState<string[]>([]);
   const [messageStudentsTarget, setMessageStudentsTarget] = useState<string[]>([]);
-  
+
   // ─── Fee Collection Search & Modal States ────────────────────────────────────
   const [collectFeeStudentId, setCollectFeeStudentId] = useState<string | undefined>(undefined);
   const [collectFeeBackView, setCollectFeeBackView] = useState<AdminView>('dashboard');
@@ -316,9 +373,9 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
   const [feeModalStep, setFeeModalStep] = useState<null | 'search' | 'payment' | 'success'>(null);
   const [searchName, setSearchName] = useState('');
   const [searchClass, setSearchClass] = useState('all');
-  
+
   const [selectedStudentForPayment, setSelectedStudentForPayment] = useState<StudentData | null>(null);
-  
+
   const [paymentAmount, setPaymentAmount] = useState<string>('');
   const [paymentType, setPaymentType] = useState<'school' | 'books' | 'transport'>('school');
   const [showPaymentSuccessModal, setShowPaymentSuccessModal] = useState<any | null>(null);
@@ -467,8 +524,8 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
   // â”€â”€â”€ Create/Update Teacher â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleCreateTeacher = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTeacher.name || !newTeacher.gender || !newTeacher.dob || !newTeacher.phone) {
-      showToast('Please fill out all required teacher fields (Name, Gender, DOB, Phone).', 'error'); return;
+    if (!newTeacher.name || !newTeacher.gender || !newTeacher.dob || !newTeacher.phone || !newTeacher.email) {
+      showToast('Please fill out all required teacher fields (Name, Gender, DOB, Phone, Email).', 'error'); return;
     }
     const isEditing = !!editingTeacherId;
     const url = isEditing ? `${API_BASE}/teachers/${editingTeacherId}` : `${API_BASE}/teachers`;
@@ -596,13 +653,13 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
 
   const handleEditStudent = (student: StudentData) => {
     setEditingStudentId(student.id || student._id || null);
-    
+
     const nameParts = (student.name || '').trim().split(/\s+/);
     const firstName = nameParts[0] || '';
     const lastName = nameParts.slice(1).join(' ') || '';
- 
+
     const teacher = teachers.find(t => t.name.toLowerCase() === (student.classTeacher || '').toLowerCase());
- 
+
     setNewStudent({
       admissionNo: student.admissionNo || '',
       admissionAcademicYear: student.admissionAcademicYear || '2026-27',
@@ -629,7 +686,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
     });
     setActiveView('students');
   };
- 
+
   const handleCancelEditStudent = () => {
     setEditingStudentId(null);
     setNewStudent({
@@ -665,8 +722,8 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
       const headers: HeadersInit = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      // The backend runs the shared fee calculation and queues the approved
-      // fee_general_reminder template — no free-form message from the client.
+      // The backend runs the shared fee calculation (fee type + amount) and sends
+      // the approved installment_reminder template — no free-form message.
       const res = await fetch(`${API_BASE}/dashboard/send-reminder`, {
         method: 'POST', headers,
         body: JSON.stringify({ studentId, feeCategory }),
@@ -706,107 +763,243 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
   };
 
   // Render receipt PDF
-  const generateReceiptPDF = async (receiptData: any, student: StudentData): Promise<string> => {
-    // Rendered locally with the bundled `qrcode` package (same as the report card)
-    // rather than round-tripping the verification token through a third-party API,
-    // and pointed at the origin the receipt was issued from so a printed QR is not
-    // pinned to one machine's dev address.
-    const verifyUrl = `${window.location.origin}/?verify_token=${receiptData.receiptNo || receiptData.token}`;
-    const qrUrl = await QRCode.toDataURL(verifyUrl, { width: 150, margin: 1 });
+  const generateReceiptPDF = (receiptData: any, student: StudentData): Promise<string> => {
     return new Promise((resolve) => {
       const doc = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
-        format: 'a5'
+        format: 'a5' // 148mm x 210mm
       });
 
-      // Header Title
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(16);
-      doc.setTextColor(30, 58, 138); // Deep Navy
-      doc.text('RND ERP SCHOOL', 15, 20);
+      const pageWidth = 148;
+      const pageHeight = 210;
 
-      doc.setFontSize(9);
+      // Extract school info dynamically from settings
+      const schoolName = schoolProfile?.schoolInfo?.schoolName || 'SCHOOLHUB ACADEMY';
+      const addressLine = [
+        schoolProfile?.address?.addressLine,
+        schoolProfile?.address?.city,
+        schoolProfile?.address?.state,
+        schoolProfile?.address?.pincode
+      ].filter(Boolean).join(', ') || '123 Education Campus Road, Hyderabad, Telangana';
+      const phone = schoolProfile?.contactInfo?.phone || '+91 9392646349';
+      const email = schoolProfile?.contactInfo?.email || 'admin@schoolhub.edu';
+      const academicYear = schoolProfile?.academicConfig?.currentAcademicYear || '2026-27';
+
+      // Outer Border
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.4);
+      doc.rect(5, 5, pageWidth - 10, pageHeight - 10);
+      doc.rect(6, 6, pageWidth - 12, pageHeight - 12);
+
+      // Top Navy Header Bar
+      doc.setFillColor(15, 23, 42); // slate-900 #0f172a
+      doc.rect(6, 6, pageWidth - 12, 28, 'F');
+
+      // Amber Gold Accent strip
+      doc.setFillColor(217, 119, 6); // amber-600 #d97706
+      doc.rect(6, 34, pageWidth - 12, 1.2, 'F');
+
+      // School Name
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.setTextColor(255, 255, 255);
+      doc.text(schoolName.toUpperCase(), 12, 16);
+
+      // Address & Contact
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(203, 213, 225); // slate-300
+      doc.text(addressLine.length > 55 ? addressLine.substring(0, 52) + '…' : addressLine, 12, 22);
+      doc.text(`Phone: ${phone}  |  Email: ${email}`, 12, 27);
+
+      // Right Top Badge: Fee Receipt Title
+      doc.setFillColor(30, 58, 138); // blue-900
+      doc.roundedRect(pageWidth - 48, 11, 40, 16, 1, 1, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(255, 255, 255);
+      doc.text('FEE RECEIPT', pageWidth - 28, 17, { align: 'center' });
+      doc.setFontSize(7);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`AY: ${academicYear}`, pageWidth - 28, 23, { align: 'center' });
+
+      let y = 41;
+
+      // Receipt Metadata Box & Student Details Box (Side-by-Side Cards)
+      const cardW = (pageWidth - 28) / 2; // 60mm each
+
+      // Left Box: Receipt Details
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(226, 232, 240);
+      doc.roundedRect(10, y, cardW, 36, 1.5, 1.5, 'FD');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(30, 58, 138);
+      doc.text('RECEIPT INFORMATION', 14, y + 6);
+      doc.setDrawColor(203, 213, 225);
+      doc.line(14, y + 8, 10 + cardW - 4, y + 8);
+
+      doc.setFontSize(7.5);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(100, 116, 139);
-      doc.text('Official Fee Receipt & Payment Confirmation', 15, 25);
+      doc.text('Receipt No:', 14, y + 14);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      doc.text(receiptData.receiptNo || 'N/A', 36, y + 14);
 
-      // Divider Line
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text('Date:', 14, y + 20);
+      doc.setTextColor(15, 23, 42);
+      doc.text(receiptData.paymentDate || new Date().toISOString().split('T')[0], 36, y + 20);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text('Time:', 14, y + 26);
+      doc.setTextColor(15, 23, 42);
+      doc.text(receiptData.paymentTime || new Date().toLocaleTimeString(), 36, y + 26);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text('Mode:', 14, y + 32);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(30, 58, 138);
+      doc.text((receiptData.paymentMode || 'Cash').toUpperCase(), 36, y + 32);
+
+      // Right Box: Student Info
+      const xRight = 10 + cardW + 8;
+      doc.setFillColor(248, 250, 252);
       doc.setDrawColor(226, 232, 240);
-      doc.setLineWidth(0.5);
-      doc.line(15, 28, 133, 28);
+      doc.roundedRect(xRight, y, cardW, 36, 1.5, 1.5, 'FD');
 
-      // Details
-      doc.setFontSize(9);
       doc.setFont('helvetica', 'bold');
-      doc.setTextColor(71, 85, 105);
-      doc.text('Receipt Details', 15, 36);
+      doc.setFontSize(8);
+      doc.setTextColor(30, 58, 138);
+      doc.text('STUDENT INFORMATION', xRight + 4, y + 6);
+      doc.setDrawColor(203, 213, 225);
+      doc.line(xRight + 4, y + 8, xRight + cardW - 4, y + 8);
+
+      doc.setFontSize(7.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text('Student Name:', xRight + 4, y + 14);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      const stName = receiptData.studentName || `${student.firstName || ''} ${student.lastName || ''}`.trim();
+      doc.text(stName.length > 20 ? stName.substring(0, 18) + '…' : stName, xRight + 26, y + 14);
 
       doc.setFont('helvetica', 'normal');
-      doc.text('Receipt No:', 15, 42);
+      doc.setTextColor(100, 116, 139);
+      doc.text('Admission ID:', xRight + 4, y + 20);
       doc.setFont('helvetica', 'bold');
-      doc.text(receiptData.receiptNo, 45, 42);
+      doc.setTextColor(15, 23, 42);
+      doc.text(student.admissionNo || 'N/A', xRight + 26, y + 20);
 
       doc.setFont('helvetica', 'normal');
-      doc.text('Date:', 15, 48);
-      doc.text(receiptData.paymentDate, 45, 48);
-
-      doc.text('Time:', 15, 54);
-      doc.text(receiptData.paymentTime, 45, 54);
-
-      // Student details
+      doc.setTextColor(100, 116, 139);
+      doc.text('Class & Sec:', xRight + 4, y + 26);
       doc.setFont('helvetica', 'bold');
-      doc.text('Student Details', 15, 64);
+      doc.setTextColor(15, 23, 42);
+      doc.text(`Class ${student.class} - ${student.section}`, xRight + 26, y + 26);
+
       doc.setFont('helvetica', 'normal');
-      doc.text('Student Name:', 15, 70);
-      doc.text(receiptData.studentName, 45, 70);
+      doc.setTextColor(100, 116, 139);
+      doc.text('Phone:', xRight + 4, y + 32);
+      doc.setTextColor(15, 23, 42);
+      doc.text(student.whatsappNo || 'N/A', xRight + 26, y + 32);
 
-      doc.text('Admission ID:', 15, 76);
-      doc.text(student.admissionNo, 45, 76);
+      y += 42;
 
-      doc.text('Class & Section:', 15, 82);
-      doc.text(`Class ${student.class} - ${student.section}`, 45, 82);
-
-      // Payment Breakdown
+      // Itemized Fee Breakdown Table
+      doc.setFillColor(30, 41, 59); // slate-800
+      doc.rect(10, y, pageWidth - 20, 7, 'F');
       doc.setFont('helvetica', 'bold');
-      doc.text('Payment Breakdown', 15, 92);
-      
-      doc.setFont('helvetica', 'normal');
-      doc.text('Fee Category:', 15, 98);
-      doc.text(
-        receiptData.feeType === 'school' ? 'Tuition Fee' : receiptData.feeType === 'books' ? 'Books Fee' : 'Transport Fee', 45, 98
-      );
+      doc.setFontSize(7.5);
+      doc.setTextColor(255, 255, 255);
+      doc.text('SL', 14, y + 4.5);
+      doc.text('FEE DESCRIPTION', 30, y + 4.5);
+      doc.text('PAYMENT TYPE', 85, y + 4.5);
+      doc.text('AMOUNT PAID (INR)', pageWidth - 14, y + 4.5, { align: 'right' });
 
-      doc.text('Amount Paid:', 15, 104);
+      y += 7;
+
+      // Row 1
+      doc.setFillColor(255, 255, 255);
+      doc.rect(10, y, pageWidth - 20, 8, 'F');
+      doc.setDrawColor(226, 232, 240);
+      doc.line(10, y + 8, pageWidth - 10, y + 8);
+
+      const feeName = receiptData.feeType === 'school' ? 'Tuition Fee Payment' : receiptData.feeType === 'books' ? 'Books & Material Fee' : 'Transport Fee';
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(15, 23, 42);
+      doc.text('1', 14, y + 5);
+      doc.text(feeName, 30, y + 5);
+      doc.text('Partial / Installment', 85, y + 5);
+
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(22, 163, 74); // Green
-      doc.text(`INR ${Number(receiptData.amount).toLocaleString()}`, 45, 104);
+      doc.text(`Rs. ${Number(receiptData.amount).toLocaleString('en-IN')}`, pageWidth - 14, y + 5, { align: 'right' });
 
-      doc.setTextColor(71, 85, 105);
-      doc.setFont('helvetica', 'normal');
-      doc.text('Payment Mode:', 15, 110);
-      doc.text('Cash', 45, 110);
+      y += 12;
 
-      // Verification Area
-      doc.setDrawColor(226, 232, 240);
-      doc.line(15, 116, 133, 116);
+      // Total Net Amount Banner Card
+      doc.setFillColor(240, 253, 244); // green-50
+      doc.setDrawColor(187, 247, 208);
+      doc.roundedRect(10, y, pageWidth - 20, 14, 1.5, 1.5, 'FD');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor(21, 128, 61);
+      doc.text('TOTAL RECEIVED AMOUNT:', 15, y + 8.5);
+
+      doc.setFontSize(13);
+      doc.text(`INR ${Number(receiptData.amount).toLocaleString('en-IN')}`, pageWidth - 15, y + 9, { align: 'right' });
+
+      y += 20;
+
+      // Verification & QR Scanner Box (Preserved QR Code Scanner)
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(203, 213, 225);
+      doc.roundedRect(10, y, pageWidth - 20, 32, 1.5, 1.5, 'FD');
 
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(8);
       doc.setTextColor(15, 23, 42);
-      doc.text('Verified by School ERP', 15, 122);
+      doc.text('OFFICIAL VERIFICATION & AUTHENTICITY', 14, y + 6);
+
       doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
       doc.setTextColor(100, 116, 139);
-      doc.text('This receipt can be verified by scanning the QR code.', 15, 126);
+      doc.text('This receipt is cryptographically generated & verified.', 14, y + 11);
+      doc.text('Scan the QR code to verify this transaction on the portal.', 14, y + 15);
+      doc.text('Verified by: SchoolHub Security Engine', 14, y + 19);
 
-      // QR Code
+      // Signature line in verification box
+      doc.setDrawColor(148, 163, 184);
+      doc.line(14, y + 27, 55, y + 27);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.5);
+      doc.setTextColor(51, 65, 85);
+      doc.text('Authorized Cashier / Accounts Stamp', 14, y + 30);
 
+      // Generate Dynamic QR Code URL using window.location.origin
+      const originHost = window.location.origin;
+      const verifyUrl = `${originHost}/?verify_token=${receiptData.receiptNo || receiptData.token}`;
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(verifyUrl)}`;
+
+      // Draw QR Code Image into PDF
       const img = new window.Image();
+      img.crossOrigin = 'Anonymous';
       img.onload = () => {
-        doc.addImage(img, 'PNG', 103, 118, 26, 26);
-        doc.setFontSize(7);
+        doc.addImage(img, 'PNG', pageWidth - 37, y + 3, 24, 24);
+        doc.setFontSize(6);
         doc.setFont('helvetica', 'bold');
-        doc.text('Scan to verify authenticity', 103, 147);
+        doc.setTextColor(30, 58, 138);
+        doc.text('SCAN TO VERIFY', pageWidth - 25, y + 29, { align: 'center' });
         resolve(doc.output('datauristring'));
       };
       img.onerror = () => {
@@ -819,23 +1012,23 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
   const handleRecordPaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedStudentForPayment || !paymentAmount || Number(paymentAmount) <= 0) return;
-    
+
     const amountNum = Number(paymentAmount);
     const student = selectedStudentForPayment;
-    
+
     // Call the existing handleRecordPayment function
     const receipt = await handleRecordPayment(student.id || student._id || '', amountNum, paymentType);
-    
+
     if (receipt) {
       // Generate PDF receipt as base64 string
       const pdfBase64 = await generateReceiptPDF(receipt, student);
-      
+
       // Upload PDF and send WhatsApp message
       try {
         const token = getAccessToken();
         const headers: HeadersInit = { 'Content-Type': 'application/json' };
         if (token) headers['Authorization'] = `Bearer ${token}`;
-        
+
         await fetch(`${API_BASE}/dashboard/upload-receipt-pdf`, {
           method: 'POST',
           headers,
@@ -849,7 +1042,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
       } catch (uploadErr) {
         console.error('Error uploading receipt PDF:', uploadErr);
       }
-      
+
       setShowPaymentSuccessModal({ receipt, student });
       setFeeModalStep('success');
     }
@@ -957,7 +1150,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
   const handleCreateEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newEvent.title || !newEvent.date) { showToast('Title and date are required.', 'error'); return; }
-    
+
     setUploadingMedia(true);
     try {
       const res = await fetch(`${API_BASE}/events`, {
@@ -1237,7 +1430,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
           </div>
           <div className="header-right">
             {/* WhatsApp Quota Display — hidden on phones to keep the header from overflowing */}
-            <div className="hidden sm:flex" style={{
+            <div className="hidden sm:flex" onClick={handleResetQuotaFromHeader} style={{
               alignItems: 'center',
               gap: '8px',
               marginRight: '12px',
@@ -1245,8 +1438,9 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
               padding: '6px 12px',
               borderRadius: '20px',
               border: '1px solid #e2e8f0',
-              boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)'
-            }}>
+              boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)',
+              cursor: 'pointer'
+            }} title="Click to update WhatsApp message limit">
               <MessageCircle style={{ width: '16px', height: '16px', color: '#25D366' }} />
               <span style={{ fontSize: '13px', fontWeight: 600, color: '#334155', fontFamily: 'monospace' }}>
                 WA: <span style={{ color: whatsappSentCount >= whatsappLimit ? '#ef4444' : '#10b981' }}>{whatsappSentCount}</span>/{whatsappLimit}
@@ -1254,9 +1448,6 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
             </div>
 
             <div className="header-actions">
-              <button className="action-icon-btn" onClick={handleToggleTheme} title={theme === 'dark' ? "Switch to Light Theme" : "Switch to Dark Theme"}>
-                {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-              </button>
               <button className="action-icon-btn" onClick={() => showToast('Notice: Standard Schedule active')}><Bell className="w-5 h-5" /></button>
             </div>
             <div className="user-profile" onClick={() => setActiveView('profile')} style={{ cursor: 'pointer' }} title="Click to view Admin Profile">
@@ -1283,7 +1474,8 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
         {/* Content Area */}
         <div className="content-area dark:bg-slate-900">
           <div className="dashboard-main-view dark:bg-slate-900">
-            <Suspense fallback={
+            <ErrorBoundary>
+              <Suspense fallback={
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '50vh', flexDirection: 'column', gap: '12px' }}>
                 <div style={{ width: '36px', height: '36px', border: '3px solid #e2e8f0', borderTop: '3px solid #6366f1', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
                 <span style={{ color: '#64748b', fontSize: '13px' }}>Loading Section...</span>
@@ -1320,7 +1512,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                   events={events}
                   onNavigate={(v) => setActiveView(v as AdminView)}
                   onAdmitStudent={() => setActiveView('students')}
-                  onSendReminder={(student, feeCategory) => handleSendReminder(student.id || student._id || '', feeCategory || 'all')}
+                  onSendReminder={(student) => handleSendReminder(student.id || student._id, 'all')}
                   onDeleteStudent={(student) => setDeleteTarget({ type: 'student', data: student })}
                   onMessageParent={(student) => setMessageTarget(student)}
                   showToast={showToast}
@@ -1341,7 +1533,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                   filteredStudents={filteredStudents}
                   students={students}
                   classesList={classesList}
-                  onSendReminder={(student, feeCategory) => handleSendReminder(student.id || student._id || '', feeCategory || 'all')}
+                  onSendReminder={(student) => handleSendReminder(student.id || student._id, 'all')}
                   onDeleteStudent={(student) => setDeleteTarget({ type: 'student', data: student })}
                   onMessageParent={(student) => setMessageTarget(student)}
                   showToast={showToast}
@@ -1352,7 +1544,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                   }}
                 />
               )}
- 
+
               {activeView === 'collect-fee' && hasPermission('fees:view') && (
                 <AdminCollectFee
                   students={students}
@@ -1362,32 +1554,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                     setActiveView(collectFeeBackView);
                   }}
                   onRecordPayment={async (studentId, amount, feeType) => {
-                    const receipt = await handleRecordPayment(studentId, amount, feeType);
-                    if (receipt) {
-                      const student = students.find(s => s.id === studentId || (s as any)._id === studentId);
-                      if (student) {
-                        try {
-                          const pdfBase64 = await generateReceiptPDF(receipt, student);
-                          const token = getAccessToken();
-                          const headers: HeadersInit = { 'Content-Type': 'application/json' };
-                          if (token) headers['Authorization'] = `Bearer ${token}`;
-                          
-                          await fetch(`${API_BASE}/dashboard/upload-receipt-pdf`, {
-                            method: 'POST',
-                            headers,
-                            body: JSON.stringify({
-                              receiptNo: receipt.receiptNo,
-                              pdfBase64,
-                              recipient: receipt.recipient || student.whatsappNo,
-                              whatsappMessage: receipt.whatsappMessage
-                            })
-                          });
-                        } catch (uploadErr) {
-                          console.error('Error generating/uploading receipt PDF:', uploadErr);
-                        }
-                      }
-                    }
-                    return receipt;
+                    return await handleRecordPayment(studentId, amount, feeType);
                   }}
                   showToast={showToast}
                   onGoToFeeAnalytics={() => {
@@ -1444,7 +1611,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                   showToast={showToast}
                 />
               )}
- 
+
               {activeView === 'students' && hasPermission('students:read') && (
                 <AdminStudents
                   students={filteredStudents}
@@ -1465,7 +1632,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                   onFetchNextAdmissionNo={fetchNextAdmissionNo}
                 />
               )}
- 
+
               {activeView === 'attendance' && hasPermission('attendance:mark') && (
                 <AdminAttendance
                   students={students}
@@ -1474,7 +1641,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                   showToast={showToast}
                 />
               )}
- 
+
               {activeView === 'marks' && hasPermission('reports:view') && (
                 <AdminMarks
                   students={students}
@@ -1483,7 +1650,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                   showToast={showToast}
                 />
               )}
- 
+
               {activeView === 'homework' && hasPermission('homework:read') && (
                 <HomeworkBoard
                   mode="admin"
@@ -1491,7 +1658,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                   showToast={showToast}
                 />
               )}
- 
+
               {activeView === 'leaves' && hasPermission('reports:view') && (
                 <AdminLeaves
                   leavesList={leavesList}
@@ -1504,7 +1671,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                   onSendChatMessage={sendLeaveChatMessage}
                 />
               )}
- 
+
               {activeView === 'feedbacks' && hasPermission('feedback:read') && (
                 <AdminFeedbacks
                   feedbacksList={feedbacksList}
@@ -1516,14 +1683,14 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                   onSendChatMessage={sendFeedbackChatMessage}
                 />
               )}
- 
+
               {activeView === 'messages' && hasPermission('messages:read') && (
                 <AdminMessages
                   students={students}
                   teachers={teachers}
                 />
               )}
- 
+
               {activeView === 'settings' && hasPermission('settings:manage') && (
                 <AdminSettings
                   showToast={showToast}
@@ -1553,6 +1720,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                 />
               )}
             </Suspense>
+            </ErrorBoundary>
           </div>
         </div>
       </main>
@@ -1561,7 +1729,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
       {deleteTarget && (
         <div className="modal-overlay" onClick={() => { setDeleteTarget(null); setAdminPassword(''); }}>
           <div className="modal-content" style={{ maxWidth: '400px' }} onClick={(e) => e.stopPropagation()}>
-            <h4 className="modal-title" style={{ color: '#dc2626' }}>âš ï¸ Confirm Deletion</h4>
+            <h4 className="modal-title" style={{ color: '#dc2626' }}>⚠️ Confirm Deletion</h4>
             <p className="modal-desc" style={{ marginBottom: '16px' }}>
               {deleteTarget.bulkIds && deleteTarget.bulkIds.length > 0 ? (
                 <>You are about to delete <strong>{deleteTarget.bulkIds.length}</strong> {deleteTarget.type}{deleteTarget.bulkIds.length > 1 ? 's' : ''}.</>
@@ -1697,10 +1865,10 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
       {messageTarget && (
         <div className="modal-overlay" onClick={() => { setMessageTarget(null); messageComposer.reset(); }}>
           <div className="modal-content" style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
-            <h4 className="modal-title">âœ‰ï¸ Message Parent via WhatsApp</h4>
+            <h4 className="modal-title">💬 Message Parent via WhatsApp</h4>
             <p className="modal-desc" style={{ marginBottom: '16px' }}>
               Send a one-off WhatsApp notification to the parent of <strong>{messageTarget.name}</strong> at <strong>{messageTarget.whatsappNo}</strong>.
-              This is separate from the in-app Direct Messages inbox â€” it is not saved as a portal conversation.
+              This is separate from the in-app Direct Messages inbox — it is not saved as a portal conversation.
             </p>
             <MessageComposer
               composer={messageComposer}
@@ -1715,7 +1883,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
       {messageStudentsTarget.length > 0 && (
         <div className="modal-overlay" onClick={() => { setMessageStudentsTarget([]); messageComposer.reset(); }}>
           <div className="modal-content" style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
-            <h4 className="modal-title">âœ‰ï¸ Message Parent(s) via WhatsApp</h4>
+            <h4 className="modal-title">💬 Message Parent(s) via WhatsApp</h4>
             <p className="modal-desc" style={{ marginBottom: '16px' }}>
               Send a one-off WhatsApp notification to the parents of the selected {messageStudentsTarget.length} student(s).
               This is separate from the in-app Direct Messages inbox.
@@ -1733,7 +1901,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
       {messageTeachersTarget.length > 0 && (
         <div className="modal-overlay" onClick={() => { setMessageTeachersTarget([]); messageComposer.reset(); }}>
           <div className="modal-content" style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
-            <h4 className="modal-title">âœ‰ï¸ Message Teacher(s) via WhatsApp</h4>
+            <h4 className="modal-title">💬 Message Teacher(s) via WhatsApp</h4>
             <p className="modal-desc" style={{ marginBottom: '16px' }}>
               Send a one-off WhatsApp notification to the selected {messageTeachersTarget.length} teacher(s).
               This is separate from the in-app Direct Messages inbox.
@@ -1848,12 +2016,12 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
 
               <div style={{ borderTop: '1px solid #f1f5f9', margin: '16px 0' }} />
 
-              {/* â”€â”€ Step Indicator â”€â”€ */}
+              {/* --- Step Indicator --- */}
               <StepIndicator />
 
-              {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+              {/* --------------------------------------------------------------------------------------------------
                   STEP 1: SEARCH
-              â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
+              -------------------------------------------------------------------------------------------------- */}
               {feeModalStep === 'search' && (() => {
                 const query = searchName.trim().toLowerCase();
                 const filtered = students.filter(s => {
@@ -1871,7 +2039,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                           Student Name
                         </label>
                         <div style={{ position: 'relative' }}>
-                          <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '14px', color: '#94a3b8', pointerEvents: 'none' }}>ðŸ”</span>
+                          <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '14px', color: '#94a3b8', pointerEvents: 'none' }}>🔍</span>
                           <input
                             type="text"
                             className="form-input"
@@ -1923,7 +2091,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
 
                       {filtered.length === 0 ? (
                         <div style={{ textAlign: 'center', padding: '40px 16px', color: '#94a3b8', fontSize: '13px' }}>
-                          <div style={{ fontSize: '32px', marginBottom: '8px' }}>ðŸ”</div>
+                          <div style={{ fontSize: '32px', marginBottom: '8px' }}>🔍</div>
                           No students found. Try a different name or class.
                         </div>
                       ) : filtered.map((student, idx) => {
@@ -1970,7 +2138,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                               { val: transport, color: '#d97706' }
                             ].map(({ val, color }, di) => (
                               <div key={di} style={{ fontWeight: 700, fontSize: '12px', color: val > 0 ? color : '#10b981' }}>
-                                {val > 0 ? `â‚¹${val.toLocaleString()}` : 'âœ“ Paid'}
+                                {val > 0 ? `₹${val.toLocaleString()}` : '✓ Paid'}
                               </div>
                             ))}
                             {/* Collect Button */}
@@ -2016,9 +2184,9 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                 );
               })()}
 
-              {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+              {/* --------------------------------------------------------------------------------------------------
                   STEP 2: PAYMENT DETAILS
-              â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
+              -------------------------------------------------------------------------------------------------- */}
               {feeModalStep === 'payment' && selectedStudentForPayment && (() => {
                 const s = selectedStudentForPayment;
                 const tuition = s.feePending || 0;
@@ -2027,9 +2195,9 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                 const maxAmount = paymentType === 'school' ? tuition : paymentType === 'books' ? books : transport;
 
                 const feeCategories = [
-                  { key: 'school' as const, label: 'Tuition Fee', pending: tuition, icon: 'ðŸŽ“', color: '#ef4444', bg: '#fef2f2' },
-                  { key: 'books' as const, label: 'Books Fee', pending: books, icon: 'ðŸ“š', color: '#0284c7', bg: '#f0f9ff' },
-                  { key: 'transport' as const, label: 'Transport Fee', pending: transport, icon: 'ðŸšŒ', color: '#d97706', bg: '#fffbeb' },
+                  { key: 'school' as const, label: 'Tuition Fee', pending: tuition, icon: '🎓', color: '#ef4444', bg: '#fef2f2' },
+                  { key: 'books' as const, label: 'Books Fee', pending: books, icon: '📚', color: '#0284c7', bg: '#f0f9ff' },
+                  { key: 'transport' as const, label: 'Transport Fee', pending: transport, icon: '🚌', color: '#d97706', bg: '#fffbeb' },
                 ];
 
                 return (
@@ -2051,18 +2219,18 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                       <div>
                         <div style={{ fontSize: '14px', fontWeight: 800, color: '#1e293b' }}>{s.name}</div>
                         <div style={{ fontSize: '11px', color: '#64748b' }}>
-                          Adm: {s.admissionNo} Â· Class {s.class}-{s.section}
+                          Adm: {s.admissionNo} · Class {s.class}-{s.section}
                         </div>
                       </div>
                       <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
                         <div style={{ fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600 }}>Total Pending</div>
                         <div style={{ fontSize: '15px', fontWeight: 800, color: '#ef4444' }}>
-                          â‚¹{(tuition + books + transport).toLocaleString()}
+                          ₹{(tuition + books + transport).toLocaleString()}
                         </div>
                       </div>
                     </div>
 
-                    {/* Category Select â€” Cards */}
+                    {/* Category Select — Cards */}
                     <div>
                       <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b', marginBottom: '8px', letterSpacing: '0.05em' }}>
                         Fee Category
@@ -2095,11 +2263,11 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                             <span style={{ fontSize: '20px' }}>{icon}</span>
                             <span style={{ fontSize: '13px', fontWeight: 700, color: '#1e293b', flex: 1 }}>{label}</span>
                             {pending > 0 ? (
-                              <span style={{ fontSize: '13px', fontWeight: 800, color }}>â‚¹{pending.toLocaleString()} due</span>
+                              <span style={{ fontSize: '13px', fontWeight: 800, color }}>₹{pending.toLocaleString()} due</span>
                             ) : (
-                              <span style={{ fontSize: '12px', fontWeight: 700, color: '#10b981' }}>âœ“ Cleared</span>
+                              <span style={{ fontSize: '12px', fontWeight: 700, color: '#10b981' }}>✓ Cleared</span>
                             )}
-                            {paymentType === key && <span style={{ fontSize: '16px', color, marginLeft: '4px' }}>â—</span>}
+                            {paymentType === key && <span style={{ fontSize: '16px', color, marginLeft: '4px' }}>●</span>}
                           </label>
                         ))}
                       </div>
@@ -2108,16 +2276,16 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                     {/* Amount Input */}
                     <div>
                       <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b', marginBottom: '6px', letterSpacing: '0.05em' }}>
-                        Amount to Collect (â‚¹)
+                        Amount to Collect (₹)
                       </label>
                       <div style={{ position: 'relative' }}>
-                        <span style={{ position: 'absolute', left: '13px', top: '50%', transform: 'translateY(-50%)', fontSize: '15px', fontWeight: 700, color: '#94a3b8' }}>â‚¹</span>
+                        <span style={{ position: 'absolute', left: '13px', top: '50%', transform: 'translateY(-50%)', fontSize: '15px', fontWeight: 700, color: '#94a3b8' }}>₹</span>
                         <input
                           type="number"
                           required
                           min={1}
                           max={maxAmount}
-                          placeholder={`Max â‚¹${maxAmount.toLocaleString()}`}
+                          placeholder={`Max ₹${maxAmount.toLocaleString()}`}
                           value={paymentAmount}
                           onChange={(e) => setPaymentAmount(e.target.value)}
                           autoFocus
@@ -2139,13 +2307,13 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                         )}
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px' }}>
-                        <span style={{ fontSize: '11px', color: '#94a3b8' }}>Enter amount up to â‚¹{maxAmount.toLocaleString()}</span>
+                        <span style={{ fontSize: '11px', color: '#94a3b8' }}>Enter amount up to ₹{maxAmount.toLocaleString()}</span>
                         <button
                           type="button"
                           onClick={() => setPaymentAmount(String(maxAmount))}
                           style={{ fontSize: '11px', color: '#6366f1', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                         >
-                          Pay full amount â†’
+                          Pay full amount →
                         </button>
                       </div>
                     </div>
@@ -2219,7 +2387,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                         { label: 'Student', value: receipt.studentName },
                         { label: 'Class', value: `${student.class}-${student.section}` },
                         { label: 'Fee Category', value: feeLabel },
-                        { label: 'Amount Paid', value: `â‚¹${Number(receipt.amount).toLocaleString()}`, bold: true, green: true },
+                        { label: 'Amount Paid', value: `₹${Number(receipt.amount).toLocaleString()}`, bold: true, green: true },
                         { label: 'Date', value: `${receipt.paymentDate} ${receipt.paymentTime}` },
                       ].map(({ label, value, bold, green }) => (
                         <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 14px', borderBottom: '1px solid #f1f5f9' }}>

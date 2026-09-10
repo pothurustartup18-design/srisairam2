@@ -1,13 +1,27 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { MessageSquare, Send, RefreshCw, Check, CheckCheck, Smile, Paperclip, X } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import '../../admin/AdminMessages/AdminMessages.css';
+import {
+  MessageSquare,
+  Send,
+  RefreshCw,
+  Check,
+  CheckCheck,
+  Smile,
+  Paperclip,
+  X,
+  Search,
+  GraduationCap,
+  Shield,
+  ChevronLeft,
+} from 'lucide-react';
 import { API_BASE } from '../../../constants';
 import type { StudentData } from '../../../types';
 import { useSocket } from '../../../context/socketContext';
 import { cn } from '../../../lib/utils';
-import { EmptyState, LoadingSpinner } from '../../ui';
 
 interface ParentMessagesProps {
   ward: StudentData | undefined;
+  initialRecipient?: 'admin' | 'teacher';
 }
 
 interface PersonalMessage {
@@ -22,31 +36,46 @@ interface PersonalMessage {
   reaction?: string;
 }
 
-const EMOJIS = ['😊','😂','❤️','👍','🎉','🙏','😢','😮','🔥','✅'];
+const EMOJIS = ['😊', '😂', '❤️', '👍', '🎉', '🙏', '😢', '😮', '🔥', '✅', '📚', '💰'];
 
 const getInitials = (name: string) =>
-  name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+  (name || '')
+    .split(' ')
+    .map((n) => n[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2) || 'AD';
 
 const getAvatarColor = (name: string) => {
-  const colors = ['#e11d48','#d97706','#ca8a04','#16a34a','#2563eb','#7c3aed','#db2777'];
+  const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#6366f1'];
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
   return colors[Math.abs(hash) % colors.length];
 };
 
-const formatTime = (iso: string) =>
-  new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const formatTimestamp = (iso: string) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const now = new Date();
+  const diffDays = Math.floor((now.getTime() - d.getTime()) / 86400000);
+  if (diffDays === 0) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return d.toLocaleDateString([], { weekday: 'short' });
+  return d.toLocaleDateString([], { day: '2-digit', month: '2-digit' });
+};
 
-const formatDateLabel = (iso: string) =>
-  new Date(iso).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
-
-const ParentMessages: React.FC<ParentMessagesProps> = ({ ward }) => {
+const ParentMessages: React.FC<ParentMessagesProps> = ({ ward, initialRecipient = 'admin' }) => {
   const { socket } = useSocket();
   const [allMessages, setAllMessages] = useState<PersonalMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [newMsgText, setNewMsgText] = useState('');
   const [sending, setSending] = useState(false);
-  const [recipientTab, setRecipientTab] = useState<'admin' | 'teacher'>('admin');
+  const [recipientTab, setRecipientTab] = useState<'admin' | 'teacher'>(initialRecipient);
+  const [activeThreadMobile, setActiveThreadMobile] = useState<boolean>(true);
+  const [activeFilterTab, setActiveFilterTab] = useState<'all' | 'admin' | 'teacher'>(
+    initialRecipient === 'teacher' ? 'teacher' : 'all'
+  );
+  const [searchSidebar, setSearchSidebar] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [hoveredMsg, setHoveredMsg] = useState<string | null>(null);
@@ -59,37 +88,52 @@ const ParentMessages: React.FC<ParentMessagesProps> = ({ ward }) => {
   const prevTabRef = useRef<'admin' | 'teacher' | null>(null);
   const prevMessagesCountRef = useRef<number>(0);
 
-  const messages = allMessages.filter(
-    m => m.sender === recipientTab || m.recipient === recipientTab || m.sender === 'parent'
+  // Group messages
+  const adminMsgs = allMessages.filter(
+    (m) => m.sender === 'admin' || (m.sender === 'parent' && (m.recipient === 'admin' || !m.recipient))
   );
-  const adminHasUnread  = allMessages.some(m => m.sender === 'admin'   && !m.read);
-  const teacherHasUnread = allMessages.some(m => m.sender === 'teacher' && !m.read);
+  const teacherMsgs = allMessages.filter(
+    (m) => m.sender === 'teacher' || (m.sender === 'parent' && m.recipient === 'teacher')
+  );
 
-  const markAsRead = async () => {
+  const currentChatMsgs = recipientTab === 'admin' ? adminMsgs : teacherMsgs;
+  const lastAdminMsg = adminMsgs[adminMsgs.length - 1];
+  const lastTeacherMsg = teacherMsgs[teacherMsgs.length - 1];
+
+  const adminUnreadCount = allMessages.filter((m) => m.sender === 'admin' && !m.read).length;
+  const teacherUnreadCount = allMessages.filter((m) => m.sender === 'teacher' && !m.read).length;
+  const totalUnread = adminUnreadCount + teacherUnreadCount;
+
+  const markAsRead = useCallback(async (targetRecipient: 'admin' | 'teacher') => {
     if (!ward) return;
     const studentId = ward.id || ward._id;
     try {
-      await fetch(`${API_BASE}/messages/read/student/${studentId}?recipient=${recipientTab}`, { method: 'PATCH' });
+      await fetch(`${API_BASE}/messages/read/student/${studentId}?recipient=${targetRecipient}`, { method: 'PATCH' });
     } catch (err) {
       console.error('Failed to mark messages as read:', err);
     }
-    setAllMessages(prev => prev.map(m => m.sender === recipientTab ? { ...m, read: true } : m));
-  };
+    setAllMessages((prev) =>
+      prev.map((m) => (m.sender === targetRecipient ? { ...m, read: true } : m))
+    );
+  }, [ward]);
 
-  const fetchMessages = async (silent = false) => {
+  const fetchMessages = useCallback(async (silent = false) => {
     if (!ward) return;
     if (!silent) setLoading(true);
     const studentId = ward.id || ward._id;
     try {
       const res = await fetch(`${API_BASE}/messages/student/${studentId}?recipient=all`);
       const data = await res.json();
-      if (data.success) { setAllMessages(data.data); setTimeout(markAsRead, 100); }
+      if (data.success) {
+        setAllMessages(data.data || []);
+        markAsRead(recipientTab);
+      }
     } catch (err) {
       console.error('Failed to load messages:', err);
     } finally {
       if (!silent) setLoading(false);
     }
-  };
+  }, [ward, recipientTab, markAsRead]);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -103,47 +147,64 @@ const ParentMessages: React.FC<ParentMessagesProps> = ({ ward }) => {
       sender: 'parent',
       recipient: recipientTab,
       senderName,
-      text: newMsgText,
+      text: newMsgText.trim(),
       read: false,
       delivered: true,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
     };
-    setAllMessages(prev => [...prev, newMsg]);
+
+    setAllMessages((prev) => [...prev, newMsg]);
     setNewMsgText('');
     setAttachedFile(null);
     setShowEmojiPicker(false);
-    // Sending re-renders the message list; the mobile keyboard can drop
-    // focus as a result, so re-focus explicitly to keep it open.
     requestAnimationFrame(() => inputRef.current?.focus());
 
     try {
       const res = await fetch(`${API_BASE}/messages/student/${studentId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: newMsg.text, recipient: recipientTab, senderName })
+        body: JSON.stringify({ text: newMsg.text, recipient: recipientTab, senderName }),
       });
       const data = await res.json();
       if (data.success) {
         fetchMessages(true);
       } else {
-        setAllMessages(prev => prev.filter(m => m._id !== newMsg._id));
-        console.error('Failed to send message:', data.message);
+        setAllMessages((prev) => prev.filter((m) => m._id !== newMsg._id));
       }
     } catch (err) {
-      setAllMessages(prev => prev.filter(m => m._id !== newMsg._id));
-      console.error('Failed to send message:', err);
-    } finally { setSending(false); }
+      setAllMessages((prev) => prev.filter((m) => m._id !== newMsg._id));
+    } finally {
+      setSending(false);
+    }
 
     setTimeout(() => {
-      setAllMessages(prev => prev.map(m => m._id === newMsg._id ? { ...m, read: true } : m));
+      setAllMessages((prev) => prev.map((m) => (m._id === newMsg._id ? { ...m, read: true } : m)));
     }, 1500);
   };
 
   const handleReaction = (msgId: string, emoji: string) => {
-    setAllMessages(prev => prev.map(m => m._id === msgId ? { ...m, reaction: m.reaction === emoji ? undefined : emoji } : m));
+    setAllMessages((prev) =>
+      prev.map((m) => (m._id === msgId ? { ...m, reaction: m.reaction === emoji ? undefined : emoji } : m))
+    );
   };
 
-  useEffect(() => { fetchMessages(); }, [ward, recipientTab]);
+  const handleSelectConversation = (tab: 'admin' | 'teacher') => {
+    setRecipientTab(tab);
+    setActiveThreadMobile(true);
+    markAsRead(tab);
+  };
+
+  useEffect(() => {
+    if (initialRecipient) {
+      setRecipientTab(initialRecipient);
+      setActiveFilterTab(initialRecipient === 'teacher' ? 'teacher' : 'all');
+      setActiveThreadMobile(true);
+    }
+  }, [initialRecipient]);
+
+  useEffect(() => {
+    fetchMessages();
+  }, [fetchMessages]);
 
   useEffect(() => {
     if (!socket) return;
@@ -151,11 +212,11 @@ const ParentMessages: React.FC<ParentMessagesProps> = ({ ward }) => {
     const handleNewMessage = (message: any) => {
       const studentId = ward?.id || ward?._id;
       if (studentId && message.studentId === studentId) {
-        setAllMessages(prev => {
-          if (prev.some(m => m._id === message._id)) return prev;
+        setAllMessages((prev) => {
+          if (prev.some((m) => m._id === message._id)) return prev;
           return [...prev, message];
         });
-        setTimeout(markAsRead, 100);
+        markAsRead(recipientTab);
       }
     };
 
@@ -163,208 +224,447 @@ const ParentMessages: React.FC<ParentMessagesProps> = ({ ward }) => {
     return () => {
       socket.off('new_message', handleNewMessage);
     };
-  }, [socket, ward, recipientTab]);
+  }, [socket, ward, recipientTab, markAsRead]);
 
   useEffect(() => {
     const isNewTab = prevTabRef.current !== recipientTab;
-    const shouldScroll = isNewTab || messages.length > prevMessagesCountRef.current;
+    const shouldScroll = isNewTab || currentChatMsgs.length > prevMessagesCountRef.current;
 
     if (shouldScroll) {
-      // rAF lets the browser finish painting the new bubble (and settle any
-      // in-flight keyboard/viewport resize) before we measure and scroll.
       requestAnimationFrame(() => {
         bottomRef.current?.scrollIntoView({ behavior: isNewTab ? 'auto' : 'smooth', block: 'end' });
       });
     }
     if (isNewTab) prevTabRef.current = recipientTab;
-    prevMessagesCountRef.current = messages.length;
-  }, [messages, recipientTab]);
+    prevMessagesCountRef.current = currentChatMsgs.length;
+  }, [currentChatMsgs, recipientTab]);
 
   if (!ward) {
     return (
-      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
-        <EmptyState icon={<MessageSquare size={40} />} title="No student ward linked to this profile." />
+      <div className="bg-white border border-slate-200 rounded-xl p-8 text-center shadow-card font-sans">
+        <MessageSquare size={36} className="mx-auto text-slate-300 mb-2" />
+        <p className="text-sm font-bold text-slate-800">No student ward linked to this profile.</p>
       </div>
     );
   }
 
-  const contactName = recipientTab === 'admin' ? 'Administration' : 'Class Teacher';
-  const contactColor = recipientTab === 'admin' ? '#dc2626' : '#16a34a';
+  const activeContactName = recipientTab === 'admin' ? 'School Administration' : 'Class Teacher';
+  const activeSubtitle =
+    recipientTab === 'admin'
+      ? 'Official Admin & Support Desk'
+      : `Class ${ward.class}-${ward.section} Faculty`;
+
+  const showAdminInList =
+    activeFilterTab !== 'teacher' &&
+    (!searchSidebar || 'school administration admin support'.includes(searchSidebar.toLowerCase()));
+
+  const showTeacherInList =
+    activeFilterTab !== 'admin' &&
+    (!searchSidebar || `class teacher faculty ${ward.class} ${ward.section}`.includes(searchSidebar.toLowerCase()));
 
   return (
-    <div className="flex flex-col gap-4 font-sans text-slate-900 h-full">
-      <div>
-        <h1 className="text-xl font-extrabold text-slate-900 tracking-tight">Messages</h1>
-        <p className="text-xs text-slate-500 mt-0.5">Send and receive messages from the school administration and class teacher.</p>
-      </div>
+    <div className="flex flex-col gap-4 font-sans text-slate-900" style={{ flex: '1 1 auto', minHeight: 0 }}>
+      {/* ─── Main Messenger Container matching Admin Portal 1:1 ─── */}
+      <div className="am-layout" style={{ minHeight: '620px', height: 'calc(100vh - 160px)' }}>
+        {/* ── Sidebar ── */}
+        <div className={cn('am-sidebar', activeThreadMobile && 'am-sidebar--hidden-mobile')}>
+          {/* Header */}
+          <div className="am-sidebar-header">
+            <div className="am-sidebar-title-row">
+              <h3 className="am-sidebar-title">
+                Messages
+                {totalUnread > 0 && <span className="am-total-badge">{totalUnread}</span>}
+              </h3>
+            </div>
 
-    <div className="flex flex-1 min-h-0 flex-col font-sans text-slate-900 bg-white border-0 md:border md:border-slate-200 rounded-none md:rounded-2xl shadow-none md:shadow-sm overflow-hidden -m-3.5 md:m-0 w-[calc(100%+28px)] md:w-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 sm:px-5 py-3.5 border-b border-slate-200">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-white flex-shrink-0" style={{ backgroundColor: contactColor }}>
-            {recipientTab === 'admin' ? 'AD' : 'TR'}
-          </div>
-          <div>
-            <h4 className="m-0 text-md font-bold text-slate-900">{contactName}</h4>
-            <span className="text-xs text-slate-400">Direct Messages</span>
-          </div>
-        </div>
-        <button
-          className="w-11 h-11 flex items-center justify-center rounded-full border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors disabled:opacity-50"
-          onClick={() => fetchMessages()}
-          disabled={loading}
-          title="Refresh"
-        >
-          <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-        </button>
-      </div>
+            {/* Search Bar */}
+            <div className="am-search-bar">
+              <Search className="am-search-icon" />
+              <input
+                type="text"
+                placeholder="Search conversations..."
+                className="am-search-input"
+                value={searchSidebar}
+                onChange={(e) => setSearchSidebar(e.target.value)}
+              />
+              {searchSidebar && (
+                <button className="am-search-clear" onClick={() => setSearchSidebar('')} title="Clear search">
+                  <X size={12} />
+                </button>
+              )}
+            </div>
 
-      {/* Tabs */}
-      <div className="flex border-b border-slate-100">
-        <button
-          className={cn(
-            'flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-semibold border-b-2 transition-colors',
-            recipientTab === 'admin' ? 'text-blue border-blue' : 'text-slate-500 border-transparent hover:bg-blue-lt hover:text-blue'
-          )}
-          onClick={() => setRecipientTab('admin')}
-        >
-          Administration
-          {adminHasUnread && <span className="w-1.5 h-1.5 rounded-full bg-red" />}
-        </button>
-        <button
-          className={cn(
-            'flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-semibold border-b-2 transition-colors',
-            recipientTab === 'teacher' ? 'text-blue border-blue' : 'text-slate-500 border-transparent hover:bg-blue-lt hover:text-blue'
-          )}
-          onClick={() => setRecipientTab('teacher')}
-        >
-          Class Teacher
-          {teacherHasUnread && <span className="w-1.5 h-1.5 rounded-full bg-red" />}
-        </button>
-      </div>
-
-      {/* Chat Body */}
-      <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-4 bg-slate-50 flex flex-col" ref={chatBodyRef}>
-        {loading && messages.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center"><LoadingSpinner fullPage /></div>
-        ) : messages.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center gap-1.5 text-center text-slate-400">
-            <MessageSquare size={38} />
-            <p className="m-0 text-sm font-semibold text-slate-700">No messages yet with {contactName}.</p>
-            <span className="text-xs text-slate-400">Send a message below to start the conversation.</span>
+            {/* Tabs */}
+            <div className="am-tabs">
+              <button
+                type="button"
+                className={cn('am-tab', activeFilterTab === 'all' && 'active')}
+                onClick={() => setActiveFilterTab('all')}
+              >
+                <MessageSquare size={14} />
+                <span>All</span>
+                {totalUnread > 0 && <span className="am-tab-badge">{totalUnread}</span>}
+              </button>
+              <button
+                type="button"
+                className={cn('am-tab', activeFilterTab === 'admin' && 'active')}
+                onClick={() => setActiveFilterTab('admin')}
+              >
+                <Shield size={14} />
+                <span>Admin</span>
+                {adminUnreadCount > 0 && <span className="am-tab-badge">{adminUnreadCount}</span>}
+              </button>
+              <button
+                type="button"
+                className={cn('am-tab', activeFilterTab === 'teacher' && 'active')}
+                onClick={() => setActiveFilterTab('teacher')}
+              >
+                <GraduationCap size={14} />
+                <span>Teacher</span>
+                {teacherUnreadCount > 0 && <span className="am-tab-badge">{teacherUnreadCount}</span>}
+              </button>
+            </div>
           </div>
-        ) : (
-          <div className="flex flex-col gap-1">
-            {messages.map((msg, idx) => {
-              const isMe = msg.sender === 'parent';
-              const showDate = idx === 0 || (
-                new Date(messages[idx - 1].createdAt).toDateString() !== new Date(msg.createdAt).toDateString()
-              );
-              return (
-                <React.Fragment key={msg._id}>
-                  {showDate && (
-                    <div className="flex items-center justify-center my-2.5">
-                      <span className="bg-white border border-slate-200 text-slate-500 text-2xs font-medium px-3 py-1 rounded-full">
-                        {formatDateLabel(msg.createdAt)}
-                      </span>
-                    </div>
-                  )}
+
+          {/* Threads List */}
+          <div className="am-threads-list">
+            {!showAdminInList && !showTeacherInList ? (
+              <div className="am-no-threads">
+                <MessageSquare size={32} />
+                <p>No conversations match your search.</p>
+              </div>
+            ) : (
+              <>
+                {/* Administration Thread */}
+                {showAdminInList && (
                   <div
-                    className={cn('flex items-end gap-1.5 relative mb-0.5', isMe ? 'flex-row-reverse' : 'flex-row')}
-                    onMouseEnter={() => setHoveredMsg(msg._id)}
-                    onMouseLeave={() => setHoveredMsg(null)}
-                  >
-                    {!isMe && (
-                      <div className="w-7 h-7 rounded-full flex items-center justify-center text-2xs font-bold text-white flex-shrink-0" style={{ backgroundColor: getAvatarColor(msg.senderName) }}>
-                        {getInitials(msg.senderName)}
-                      </div>
+                    className={cn(
+                      'am-thread-item',
+                      recipientTab === 'admin' && 'active',
+                      adminUnreadCount > 0 && 'has-unread'
                     )}
-                    <div className={cn('flex flex-col max-w-[85%] sm:max-w-[75%] min-w-[60px] relative', isMe ? 'items-end' : 'items-start')}>
-                      <div className={cn(
-                        'px-3 pt-2 pb-1.5 rounded-xl shadow-sm relative break-words',
-                        isMe ? 'bg-blue text-white rounded-br-[3px]' : 'bg-white text-slate-800 border border-slate-200 rounded-bl-[3px]'
-                      )}>
-                        {!isMe && <span className="block text-2xs font-bold mb-0.5 text-blue">{msg.senderName}</span>}
-                        <p className="m-0 mb-1 text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
-                        <div className="flex items-center justify-end gap-1">
-                          <span className={cn('text-[9.5px]', isMe ? 'text-blue-100' : 'text-slate-400')}>{formatTime(msg.createdAt)}</span>
-                          {isMe && (
-                            <span className={cn('flex items-center', msg.read ? 'text-blue-100' : 'text-blue-200/60')}>
-                              {msg.read ? <CheckCheck size={12} /> : <Check size={12} />}
-                            </span>
-                          )}
+                    onClick={() => handleSelectConversation('admin')}
+                  >
+                    <div className="am-avatar-wrap">
+                      <div className="am-avatar" style={{ backgroundColor: '#2563eb' }}>
+                        AD
+                      </div>
+                      <span className="am-online-dot" />
+                    </div>
+
+                    <div className="am-thread-info">
+                      <div className="am-thread-top">
+                        <span className={cn('am-thread-name', adminUnreadCount > 0 && 'bold')}>
+                          School Administration
+                        </span>
+                        <div className="am-thread-meta-right">
+                          <span className={cn('am-thread-time', adminUnreadCount > 0 && 'am-time-unread')}>
+                            {lastAdminMsg ? formatTimestamp(lastAdminMsg.createdAt) : ''}
+                          </span>
                         </div>
-                        {msg.reaction && (
-                          <div className="absolute -bottom-2 right-1.5 bg-white border border-slate-200 rounded-full px-1 text-xs shadow-sm">{msg.reaction}</div>
+                      </div>
+                      <div className="am-thread-bottom">
+                        <p className={cn('am-thread-preview', adminUnreadCount > 0 && 'am-preview-bold')}>
+                          {lastAdminMsg ? lastAdminMsg.text : 'Official administrative support desk'}
+                        </p>
+                        {adminUnreadCount > 0 && (
+                          <span className="am-unread-badge">{adminUnreadCount}</span>
                         )}
                       </div>
-                      {hoveredMsg === msg._id && (
-                        <div className={cn('flex gap-1 mt-1', isMe ? 'justify-end' : 'justify-start')}>
-                          {['👍','❤️','😂','😮','😢','🙏'].map(em => (
-                            <button
-                              key={em}
-                              className="bg-white border border-slate-200 rounded-full px-1.5 py-0.5 text-xs cursor-pointer hover:scale-125 transition-transform"
-                              onClick={() => handleReaction(msg._id, em)}
-                            >
-                              {em}
-                            </button>
-                          ))}
-                        </div>
-                      )}
                     </div>
                   </div>
-                </React.Fragment>
-              );
-            })}
-            <div ref={bottomRef} />
-          </div>
-        )}
-      </div>
+                )}
 
-      {/* Footer */}
-      <div className="bg-white border-t border-slate-200 px-3 pt-2 pb-2.5 relative">
-        <input ref={fileInputRef} type="file" className="hidden" onChange={e => setAttachedFile(e.target.files?.[0] ?? null)} />
-        {showEmojiPicker && (
-          <div className="absolute bottom-[calc(100%+6px)] left-3 bg-white border border-slate-200 rounded-xl p-1.5 flex flex-wrap gap-1 w-[200px] shadow-modal z-50">
-            {EMOJIS.map(em => (
-              <button key={em} className="w-[30px] h-[30px] border-none bg-transparent text-lg cursor-pointer rounded-md hover:bg-slate-100" onClick={() => { setNewMsgText(p => p + em); inputRef.current?.focus(); }}>{em}</button>
-            ))}
+                {/* Class Teacher Thread */}
+                {showTeacherInList && (
+                  <div
+                    className={cn(
+                      'am-thread-item',
+                      recipientTab === 'teacher' && 'active',
+                      teacherUnreadCount > 0 && 'has-unread'
+                    )}
+                    onClick={() => handleSelectConversation('teacher')}
+                  >
+                    <div className="am-avatar-wrap">
+                      <div className="am-avatar" style={{ backgroundColor: '#16a34a' }}>
+                        TR
+                      </div>
+                      <span className="am-online-dot" />
+                    </div>
+
+                    <div className="am-thread-info">
+                      <div className="am-thread-top">
+                        <span className={cn('am-thread-name', teacherUnreadCount > 0 && 'bold')}>
+                          Class Teacher
+                        </span>
+                        <div className="am-thread-meta-right">
+                          <span className={cn('am-thread-time', teacherUnreadCount > 0 && 'am-time-unread')}>
+                            {lastTeacherMsg ? formatTimestamp(lastTeacherMsg.createdAt) : ''}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="am-thread-bottom">
+                        <p className={cn('am-thread-preview', teacherUnreadCount > 0 && 'am-preview-bold')}>
+                          {lastTeacherMsg ? lastTeacherMsg.text : `Class ${ward.class}-${ward.section} faculty updates`}
+                        </p>
+                        {teacherUnreadCount > 0 && (
+                          <span className="am-unread-badge">{teacherUnreadCount}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
-        )}
-        {attachedFile && (
-          <div className="flex items-center gap-1.5 mb-1.5 px-2 py-1.5 bg-blue-lt border border-blue-200 rounded-md text-2xs text-blue">
-            <Paperclip size={12} />
-            <span className="flex-1 font-semibold text-slate-700 truncate">{attachedFile.name}</span>
-            <button className="bg-blue-100 border-none rounded-full w-4 h-4 flex items-center justify-center text-blue cursor-pointer" onClick={() => setAttachedFile(null)}><X size={11} /></button>
+        </div>
+
+        {/* ── Chat Pane ── */}
+        <div className={cn('am-chat-pane', !activeThreadMobile && 'am-chat-pane--hidden-mobile')}>
+          {/* Chat Header */}
+          <div className="am-chat-header">
+            <div className="am-chat-header-left">
+              <button
+                type="button"
+                className="am-back-btn"
+                onClick={() => setActiveThreadMobile(false)}
+                aria-label="Back to conversations"
+              >
+                <ChevronLeft size={22} />
+              </button>
+
+              <div className="am-avatar-wrap" style={{ width: 42, height: 42 }}>
+                <div
+                  className="am-avatar"
+                  style={{
+                    width: 42,
+                    height: 42,
+                    fontSize: 15,
+                    backgroundColor: recipientTab === 'admin' ? '#2563eb' : '#16a34a',
+                  }}
+                >
+                  {recipientTab === 'admin' ? 'AD' : 'TR'}
+                </div>
+                <span className="am-online-dot" />
+              </div>
+
+              <div className="am-chat-header-info">
+                <h4 className="am-chat-header-name">{activeContactName}</h4>
+                <span className="am-chat-header-status online">{activeSubtitle}</span>
+              </div>
+            </div>
+
+            <div className="am-chat-header-actions">
+              <button
+                type="button"
+                className="am-hdr-btn"
+                onClick={() => fetchMessages()}
+                disabled={loading}
+                title="Refresh conversation"
+              >
+                <RefreshCw size={17} className={loading ? 'animate-spin' : ''} />
+              </button>
+            </div>
           </div>
-        )}
-        <form className="flex items-center gap-1 sm:gap-1.5" onSubmit={handleSendMessage}>
-          <button type="button" className={cn('w-11 h-11 flex-shrink-0 border-none rounded-full flex items-center justify-center cursor-pointer transition-colors', showEmojiPicker ? 'bg-blue-lt text-blue' : 'text-slate-500 hover:bg-blue-lt hover:text-blue')} onMouseDown={e => e.preventDefault()} onClick={() => setShowEmojiPicker(v => !v)}>
-            <Smile size={18} />
-          </button>
-          <button type="button" className={cn('w-11 h-11 flex-shrink-0 border-none rounded-full flex items-center justify-center cursor-pointer transition-colors', attachedFile ? 'bg-blue-lt text-blue' : 'text-slate-500 hover:bg-blue-lt hover:text-blue')} onMouseDown={e => e.preventDefault()} onClick={() => fileInputRef.current?.click()}>
-            <Paperclip size={16} />
-          </button>
-          <input
-            ref={inputRef}
-            type="text"
-            className="flex-1 min-w-0 h-11 px-3.5 bg-slate-100 border-[1.5px] border-transparent rounded-full outline-none text-sm text-slate-900 focus:border-blue focus:bg-white transition-colors"
-            placeholder={`Type a message to ${contactName}...`}
-            autoComplete="off"
-            enterKeyHint="send"
-            value={newMsgText}
-            onChange={e => setNewMsgText(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) handleSendMessage(e as any); }}
-          />
-          <button type="submit" className="w-11 h-11 flex-shrink-0 bg-blue text-white border-none rounded-full flex items-center justify-center cursor-pointer hover:bg-blue-dk transition-colors disabled:opacity-50" onMouseDown={e => e.preventDefault()} disabled={sending || !newMsgText.trim()}>
-            <Send size={15} />
-          </button>
-        </form>
+
+          {/* Chat Body */}
+          <div className="am-chat-body" ref={chatBodyRef}>
+            {loading && currentChatMsgs.length === 0 ? (
+              <div className="am-chat-loading">
+                <div className="am-loading-spinner" />
+                <span>Loading conversation...</span>
+              </div>
+            ) : currentChatMsgs.length === 0 ? (
+              <div className="am-empty-chat">
+                <MessageSquare size={40} />
+                <p>No messages yet with {activeContactName}. Say hello!</p>
+              </div>
+            ) : (
+              <div className="am-bubbles">
+                {currentChatMsgs.map((msg, idx) => {
+                  const isMe = msg.sender === 'parent';
+                  const showDate =
+                    idx === 0 ||
+                    new Date(currentChatMsgs[idx - 1].createdAt).toDateString() !==
+                      new Date(msg.createdAt).toDateString();
+
+                  return (
+                    <React.Fragment key={msg._id}>
+                      {showDate && (
+                        <div className="am-date-divider">
+                          <span>
+                            {new Date(msg.createdAt).toLocaleDateString([], {
+                              weekday: 'long',
+                              month: 'long',
+                              day: 'numeric',
+                            })}
+                          </span>
+                        </div>
+                      )}
+
+                      <div
+                        className={cn('am-bubble-wrap', isMe ? 'me' : 'other')}
+                        onMouseEnter={() => setHoveredMsg(msg._id)}
+                        onMouseLeave={() => setHoveredMsg(null)}
+                      >
+                        {!isMe && (
+                          <div
+                            className="am-avatar"
+                            style={{
+                              width: 28,
+                              height: 28,
+                              fontSize: 10,
+                              flexShrink: 0,
+                              backgroundColor: getAvatarColor(msg.senderName),
+                            }}
+                          >
+                            {getInitials(msg.senderName)}
+                          </div>
+                        )}
+
+                        <div className="am-bubble-col">
+                          <div
+                            className={cn('am-bubble', isMe ? 'am-bubble-me' : 'am-bubble-other')}
+                            style={isMe ? { background: '#2563eb' } : {}}
+                          >
+                            {!isMe && <span className="am-bubble-sender">{msg.senderName}</span>}
+                            <p className="am-bubble-text">{msg.text}</p>
+                            <div className="am-bubble-footer">
+                              <span className="am-bubble-time">
+                                {new Date(msg.createdAt).toLocaleTimeString([], {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}
+                              </span>
+                              {isMe && (
+                                <span className={cn('am-ticks', msg.read ? 'read' : 'delivered')}>
+                                  {msg.read ? <CheckCheck size={13} /> : <Check size={13} />}
+                                </span>
+                              )}
+                            </div>
+
+                            {msg.reaction && <div className="am-reaction-badge">{msg.reaction}</div>}
+                          </div>
+
+                          {/* Reaction bar on hover */}
+                          {hoveredMsg === msg._id && (
+                            <div className={cn('am-reaction-bar', isMe ? 'me' : 'other')}>
+                              {['👍', '❤️', '😂', '😮', '😢', '🙏'].map((emoji) => (
+                                <button
+                                  key={emoji}
+                                  type="button"
+                                  className="am-reaction-btn"
+                                  onClick={() => handleReaction(msg._id, emoji)}
+                                >
+                                  {emoji}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </React.Fragment>
+                  );
+                })}
+                <div ref={bottomRef} />
+              </div>
+            )}
+          </div>
+
+          {/* Chat Footer */}
+          <div className="am-chat-footer">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx"
+              style={{ display: 'none' }}
+              onChange={(e) => setAttachedFile(e.target.files?.[0] ?? null)}
+            />
+
+            {showEmojiPicker && (
+              <div className="am-emoji-picker">
+                {EMOJIS.map((em) => (
+                  <button
+                    key={em}
+                    type="button"
+                    className="am-emoji-btn"
+                    onClick={() => {
+                      setNewMsgText((prev) => prev + em);
+                      inputRef.current?.focus();
+                    }}
+                  >
+                    {em}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {attachedFile && (
+              <div className="am-attach-preview">
+                <Paperclip size={13} />
+                <span className="am-attach-name">{attachedFile.name}</span>
+                <span className="am-attach-size">({(attachedFile.size / 1024).toFixed(1)} KB)</span>
+                <button
+                  type="button"
+                  className="am-attach-remove"
+                  onClick={() => setAttachedFile(null)}
+                  title="Remove attachment"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            )}
+
+            <form className="am-footer-form" onSubmit={handleSendMessage}>
+              <button
+                type="button"
+                className={cn('am-footer-icon-btn', showEmojiPicker && 'active')}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setShowEmojiPicker((v) => !v)}
+                title="Emojis"
+              >
+                <Smile size={20} />
+              </button>
+
+              <button
+                type="button"
+                className={cn('am-footer-icon-btn', attachedFile && 'active')}
+                title="Attach file"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Paperclip size={18} />
+              </button>
+
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder={`Type a message to ${activeContactName}…`}
+                className="am-footer-input"
+                autoComplete="off"
+                enterKeyHint="send"
+                value={newMsgText}
+                onChange={(e) => setNewMsgText(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage(e as any)}
+              />
+
+              <button
+                type="submit"
+                className="am-send-btn"
+                style={{ background: '#2563eb' }}
+                disabled={!newMsgText.trim() || sending}
+                onMouseDown={(e) => e.preventDefault()}
+                title="Send"
+              >
+                <Send size={16} />
+              </button>
+            </form>
+          </div>
+        </div>
       </div>
-    </div>
     </div>
   );
 };
 
 export default ParentMessages;
+

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, lazy, Suspense, useMemo } from 'react';
-import { Search, Sun, Moon, Bell, Menu, Users } from 'lucide-react';
+import { Search, Menu, Users } from 'lucide-react';
 import type {
   UserProfile,
   StudentData,
@@ -12,6 +12,7 @@ import type {
 import { API_BASE } from '../../../constants';
 import Toast from '../../shared/Toast/Toast';
 import { ParentSidebar } from '../../shared/Sidebars/Sidebars';
+import ErrorBoundary from '../../shared/ErrorBoundary/ErrorBoundary';
 
 // ─── Lazy Loaded Views ───────────────────────────────────────────────────────
 const ParentDashboard = lazy(() => import('../ParentDashboard/ParentDashboard'));
@@ -52,24 +53,45 @@ const ParentPortal: React.FC<ParentPortalProps> = ({ user, students, teachers = 
 
   // ─── Multi-ward Detection & Selection ──────────────────────────────────────
   const allWards = useMemo(() => {
-    if (!students || students.length === 0) return [];
-    
-    // First find primary ward by admissionNo or studentId
-    const primaryWards = students.filter(
-      (s) => s.admissionNo === user.admissionNo || s.id === user.studentId || (s as any)._id === user.studentId
-    );
+    if (students && students.length > 0) {
+      // First find primary ward by admissionNo or studentId
+      const primaryWards = students.filter(
+        (s) => s.admissionNo === user.admissionNo || s.id === user.studentId || (s as any)._id === user.studentId
+      );
 
-    // Also find any sibling matching the parent's phone
-    const siblingWards = user.phone
-      ? students.filter(
+      // Also find any sibling matching the parent's phone
+      const siblingWards = user.phone
+        ? students.filter(
           (s) =>
             (s.whatsappNo === user.phone || s.motherWhatsappNo === user.phone) &&
             !primaryWards.some((p) => (p.id || p._id) === (s.id || s._id))
         )
-      : [];
+        : [];
 
-    const combined = [...primaryWards, ...siblingWards];
-    return combined.length > 0 ? combined : students.slice(0, 1);
+      const combined = [...primaryWards, ...siblingWards];
+      if (combined.length > 0) return combined;
+      return students.slice(0, 1);
+    }
+
+    // Default fallback ward constructed from user profile if students list is empty (e.g. for Parent role)
+    const fallback: StudentData = {
+      id: user.studentId || 'ward-1',
+      _id: user.studentId || 'ward-1',
+      admissionNo: user.admissionNo || user.username || 'ADM-001',
+      name: user.studentName || user.name || 'Student',
+      class: user.assignedClass ? user.assignedClass.split('-')[0] : '10',
+      section: user.assignedClass ? user.assignedClass.split('-')[1] || 'A' : 'A',
+      classTeacher: 'Class Teacher',
+      feePaid: 0,
+      feePending: 0,
+      whatsappNo: user.phone || '',
+      motherWhatsappNo: '',
+      transportMode: 'school',
+      booksFee: 0,
+      preferredLanguage: 'en',
+      cluster: '',
+    };
+    return [fallback];
   }, [students, user]);
 
   const [selectedWardId, setSelectedWardId] = useState<string>(() => {
@@ -87,8 +109,28 @@ const ParentPortal: React.FC<ParentPortalProps> = ({ user, students, teachers = 
   }, [allWards, selectedWardId]);
 
   const ward = useMemo(() => {
-    return allWards.find((s) => (s.id || s._id) === selectedWardId) || allWards[0];
-  }, [allWards, selectedWardId]);
+    const found = allWards.find((s) => (s.id || s._id) === selectedWardId);
+    return (
+      found ||
+      allWards[0] || {
+        id: user.studentId || 'ward-1',
+        _id: user.studentId || 'ward-1',
+        admissionNo: user.admissionNo || 'ADM-001',
+        name: user.studentName || user.name || 'Student',
+        class: '10',
+        section: 'A',
+        classTeacher: 'Class Teacher',
+        feePaid: 0,
+        feePending: 0,
+        whatsappNo: user.phone || '',
+        motherWhatsappNo: '',
+        transportMode: 'school',
+        booksFee: 0,
+        preferredLanguage: 'en',
+        cluster: '',
+      }
+    );
+  }, [allWards, selectedWardId, user]);
 
   // ─── Theme Integration ─────────────────────────────────────────────────────
   const [theme, setTheme] = useState(document.documentElement.classList.contains('dark') ? 'dark' : 'light');
@@ -115,6 +157,7 @@ const ParentPortal: React.FC<ParentPortalProps> = ({ user, students, teachers = 
     typeof window !== 'undefined' && window.innerWidth >= 768 && window.innerWidth < 1024
   );
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [messagesRecipient, setMessagesRecipient] = useState<'admin' | 'teacher'>('admin');
 
   const handleToggleSidebar = () => {
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
@@ -196,7 +239,12 @@ const ParentPortal: React.FC<ParentPortalProps> = ({ user, students, teachers = 
       <ParentSidebar
         activeView={activeView}
         onNavigate={(view) => {
-          setActiveView(view as ParentView);
+          if (view.startsWith('messages:')) {
+            setMessagesRecipient(view.split(':')[1] as 'admin' | 'teacher');
+            setActiveView('messages');
+          } else {
+            setActiveView(view as ParentView);
+          }
           setMobileSidebarOpen(false);
         }}
         onLogout={onLogout}
@@ -252,26 +300,6 @@ const ParentPortal: React.FC<ParentPortalProps> = ({ user, students, teachers = 
               </div>
             )}
 
-            <div className="header-actions">
-              <button
-                className="action-icon-btn"
-                onClick={handleToggleTheme}
-                title={theme === 'dark' ? 'Switch to Light Theme' : 'Switch to Dark Theme'}
-              >
-                {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-              </button>
-              <button
-                className="action-icon-btn relative"
-                onClick={() => setActiveView('notices')}
-                title="School Notices & Circulars"
-              >
-                <Bell className="w-5 h-5" />
-                {events.length > 0 && (
-                  <span className="w-2 h-2 rounded-full bg-blue-600 absolute top-1.5 right-1.5" />
-                )}
-              </button>
-            </div>
-
             {/* Parent User Info */}
             <div
               className="user-profile cursor-pointer"
@@ -304,96 +332,105 @@ const ParentPortal: React.FC<ParentPortalProps> = ({ user, students, teachers = 
         <div className="content-area">
           <div className="dashboard-main-view">
             <div className="w-full">
-              <Suspense
-                fallback={
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      height: '50vh',
-                      flexDirection: 'column',
-                      gap: '12px',
-                    }}
-                  >
+              <ErrorBoundary>
+                <Suspense
+                  fallback={
                     <div
                       style={{
-                        width: '36px',
-                        height: '36px',
-                        border: '3px solid #e2e8f0',
-                        borderTop: '3px solid #6366f1',
-                        borderRadius: '50%',
-                        animation: 'spin 1s linear infinite',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        height: '50vh',
+                        flexDirection: 'column',
+                        gap: '12px',
                       }}
+                    >
+                      <div
+                        style={{
+                          width: '36px',
+                          height: '36px',
+                          border: '3px solid #e2e8f0',
+                          borderTop: '3px solid #6366f1',
+                          borderRadius: '50%',
+                          animation: 'spin 1s linear infinite',
+                        }}
+                      />
+                      <span style={{ color: '#64748b', fontSize: '13px', fontWeight: 500 }}>
+                        Loading Section…
+                      </span>
+                      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+                    </div>
+                  }
+                >
+                  {activeView === 'dashboard' && (
+                    <ParentDashboard
+                      ward={ward}
+                      allWards={allWards}
+                      onSelectWard={(id) => setSelectedWardId(id)}
+                      user={user}
+                      teachers={teachers}
+                      examResults={examResults}
+                      events={events}
+                      unreadMessagesCount={unreadMessagesCount}
+                      onNavigate={(view) => {
+                        if (view.startsWith('messages:')) {
+                          setMessagesRecipient(view.split(':')[1] as 'admin' | 'teacher');
+                          setActiveView('messages');
+                        } else {
+                          setActiveView(view as ParentView);
+                        }
+                      }}
+                      showToast={showToast}
                     />
-                    <span style={{ color: '#64748b', fontSize: '13px', fontWeight: 500 }}>
-                      Loading Section…
-                    </span>
-                    <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
-                  </div>
-                }
-              >
-                {activeView === 'dashboard' && (
-                  <ParentDashboard
-                    ward={ward}
-                    allWards={allWards}
-                    onSelectWard={(id) => setSelectedWardId(id)}
-                    user={user}
-                    teachers={teachers}
-                    examResults={examResults}
-                    events={events}
-                    unreadMessagesCount={unreadMessagesCount}
-                    onNavigate={(view) => setActiveView(view as ParentView)}
-                    showToast={showToast}
-                  />
-                )}
+                  )}
 
-                {activeView === 'profile' && (
-                  <ParentProfile ward={ward} user={user} teachers={teachers} events={events} />
-                )}
+                  {activeView === 'profile' && (
+                    <ParentProfile ward={ward} user={user} teachers={teachers} events={events} />
+                  )}
 
-                {activeView === 'results' && (
-                  <ParentResults examResults={examResults} />
-                )}
+                  {activeView === 'results' && (
+                    <ParentResults examResults={examResults} />
+                  )}
 
-                {activeView === 'attendance' && (
-                  <ParentAttendance ward={ward} />
-                )}
+                  {activeView === 'attendance' && (
+                    <ParentAttendance ward={ward} />
+                  )}
 
-                {activeView === 'homework' && (
-                  <HomeworkBoard
-                    mode="parent"
-                    wardClassRoom={ward ? `${ward.class}-${ward.section}` : undefined}
-                    wardId={ward?.id || ward?._id}
-                    showToast={showToast}
-                  />
-                )}
+                  {activeView === 'homework' && (
+                    <HomeworkBoard
+                      mode="parent"
+                      wardClassRoom={ward ? `${ward.class}-${ward.section}` : undefined}
+                      wardId={ward?.id || ward?._id}
+                      showToast={showToast}
+                    />
+                  )}
 
-                {activeView === 'fees' && (
-                  <ParentFees ward={ward} showToast={showToast} />
-                )}
+                  {activeView === 'fees' && (
+                    <ParentFees ward={ward} showToast={showToast} />
+                  )}
 
-                {activeView === 'feedback' && (
-                  <ParentFeedback
-                    ward={ward}
-                    feedbackList={feedbackList}
-                    loadFeedbacks={loadFeedbacks}
-                    onShowToast={showToast}
-                  />
-                )}
+                  {activeView === 'feedback' && (
+                    <ParentFeedback
+                      ward={ward}
+                      feedbackList={feedbackList}
+                      loadFeedbacks={loadFeedbacks}
+                      onShowToast={showToast}
+                    />
+                  )}
 
-                {activeView === 'messages' && (
-                  <ParentMessages ward={ward} />
-                )}
+                  {activeView === 'messages' && (
+                    <ParentMessages ward={ward} initialRecipient={messagesRecipient} />
+                  )}
 
-                {activeView === 'account' && (
-                  <ParentAccountProfile showToast={showToast} />
-                )}
+                  {activeView === 'account' && (
+                    <ParentAccountProfile showToast={showToast} />
+                  )}
 
-                {activeView === 'notices' && (
-                  <ParentNotices events={events} />
-                )}
-              </Suspense>
+                  {activeView === 'notices' && (
+                    <ParentNotices events={events} />
+                  )}
+                </Suspense>
+              </ErrorBoundary>
             </div>
           </div>
         </div>

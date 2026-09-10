@@ -22,6 +22,16 @@ const VerifyReceipt: React.FC = () => {
   const [status, setStatus] = useState<'VERIFIED' | 'INVALID'>('INVALID');
   const [reason, setReason] = useState('');
   const [receipt, setReceipt] = useState<ReceiptDetails | null>(null);
+  const [schoolProfile, setSchoolProfile] = useState<any>(null);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/school-profile`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.data) setSchoolProfile(data.data);
+      })
+      .catch(err => console.error('Failed to load school profile:', err));
+  }, []);
 
   const generatePDF = () => {
     if (!receipt) return;
@@ -30,6 +40,8 @@ const VerifyReceipt: React.FC = () => {
       unit: 'mm',
       format: 'a4'
     });
+
+    const sName = (schoolProfile?.schoolInfo?.schoolName || 'SCHOOLHUB ACADEMY').toUpperCase();
 
     // Outer border
     doc.rect(5, 5, 200, 287);
@@ -41,8 +53,8 @@ const VerifyReceipt: React.FC = () => {
 
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(22);
-    doc.text('RND SCHOOL ERP', 105, 22, { align: 'center' });
+    doc.setFontSize(20);
+    doc.text(sName, 105, 22, { align: 'center' });
     
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);

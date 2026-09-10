@@ -1,5 +1,18 @@
 import React, { useMemo } from 'react';
-import { Bus, Car, TrendingUp, CalendarDays, UserCheck, Phone, Mail } from 'lucide-react';
+import {
+  Bus,
+  Car,
+  TrendingUp,
+  CalendarDays,
+  UserCheck,
+  Phone,
+  Mail,
+  User,
+  ShieldCheck,
+  CreditCard,
+  GraduationCap,
+  Calendar,
+} from 'lucide-react';
 import type { StudentData, TeacherData, EventData, UserProfile } from '../../../types';
 import { formatClassName } from '../../../constants';
 import { cn } from '../../../lib/utils';
@@ -16,16 +29,17 @@ interface ParentProfileProps {
 const ParentProfile: React.FC<ParentProfileProps> = ({ ward, user, teachers = [], events }) => {
   if (!ward) {
     return (
-      <div className="bg-white border border-slate-200 rounded-xl shadow-sm">
+      <div className="bg-white border border-slate-200 rounded-xl p-8 text-center shadow-card">
         <EmptyState title={`Student record not found for admission number: ${user.admissionNo}`} />
       </div>
     );
   }
 
-  const feePaidPct = Math.min(100, Math.round((ward.feePaid / ((ward.feePaid + ward.feePending) || 1)) * 100));
+  const totalFee = ward.totalFee || ward.feePaid + ward.feePending || 0;
+  const feePaidPct = totalFee > 0 ? Math.min(100, Math.round((ward.feePaid / totalFee) * 100)) : 100;
   const [bg, fg] = getAvatarColors(ward.name);
   const visibleEvents = events.filter((ev) => ev.sendAlertsTo !== 'teachers').slice(0, 4);
-  const progressColor = feePaidPct === 100 ? '#10b981' : feePaidPct >= 70 ? '#3b82f6' : feePaidPct >= 40 ? '#f59e0b' : '#ef4444';
+  const isFeeCleared = ward.feePending <= 0;
 
   const classTeacher = useMemo(() => {
     if (!ward) return null;
@@ -58,128 +72,183 @@ const ParentProfile: React.FC<ParentProfileProps> = ({ ward, user, teachers = []
     (typeof ward.classTeacher === 'object' ? ward.classTeacher?.email : undefined);
 
   return (
-    <div className="flex flex-col gap-4 font-sans text-slate-900">
-      {/* Page title */}
-      <div>
-        <h1 className="text-xl font-extrabold text-slate-900 tracking-tight">Child Overview</h1>
-        <p className="text-xs text-slate-500 mt-0.5">Academic profile, class teacher contact, and fee overview for your ward.</p>
+    <div className="flex flex-col gap-5 font-sans text-slate-900">
+      {/* ─── PAGE HEADER (Matches Admin Style) ─── */}
+      <div className="flex items-start justify-between gap-4 flex-wrap bg-white border border-slate-200 rounded-xl px-6 py-5 shadow-card">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900 m-0">Student Profile &amp; Overview</h2>
+          <p className="text-sm text-slate-500 mt-1">
+            Complete academic registration details, guardian information, and official records for {ward.name}.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 text-xs font-bold bg-blue-50 text-blue-700 border border-blue-100 rounded-lg px-3 py-1.5">
+            <GraduationCap size={14} /> Class {formatClassName(ward.class, ward.section)}
+          </span>
+          <span className="inline-flex items-center gap-1 text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200 rounded-lg px-3 py-1.5">
+            {ward.transportMode === 'school' ? <><Bus size={13} /> School Bus</> : <><Car size={13} /> Private Transport</>}
+          </span>
+        </div>
       </div>
 
-      {/* Student Card */}
-      <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-        <div className="h-1 w-full bg-gradient-to-r from-indigo-500 via-blue-500 to-cyan-400" />
+      {/* ─── 2-COLUMN BALANCED LAYOUT ─── */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-5">
+        {/* ─── LEFT COLUMN: Student Details & Info Card ─── */}
+        <div className="flex flex-col gap-5">
+          {/* Identity & Bio Card */}
+          <div className="bg-white border border-slate-200 rounded-xl shadow-card overflow-hidden">
+            <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex items-center gap-4">
+              <div
+                className="w-14 h-14 rounded-2xl flex items-center justify-center text-lg font-extrabold flex-shrink-0 shadow-xs"
+                style={{ background: bg, color: fg }}
+              >
+                {getInitials(ward.name)}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-lg font-bold text-slate-900 truncate">{ward.name}</div>
+                <div className="text-xs text-slate-500 mt-0.5">
+                  Admission No: <strong className="text-slate-800">{ward.admissionNo}</strong> · Roll Number: <strong className="text-slate-800">{ward.rollNumber || 'N/A'}</strong>
+                </div>
+              </div>
+            </div>
 
-        {/* Student info row */}
-        <div className="px-4 py-3 flex items-center gap-3">
-          <div
-            className="w-11 h-11 rounded-xl flex items-center justify-center text-sm font-extrabold flex-shrink-0"
-            style={{ background: bg, color: fg }}
-          >
-            {getInitials(ward.name)}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-bold text-slate-900 truncate">{ward.name}</div>
-            <div className="text-xs text-slate-500 truncate">
-              {ward.admissionNo} · {formatClassName(ward.class, ward.section)}
+            {/* Structured Info Grid */}
+            <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+              <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">Academic Class</span>
+                <span className="font-bold text-slate-900 text-sm">{formatClassName(ward.class, ward.section)}</span>
+              </div>
+
+              <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">Transport Facility</span>
+                <span className="font-bold text-slate-900 text-sm capitalize">{ward.transportMode || 'Self / Private'}</span>
+              </div>
+
+              <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">Primary WhatsApp Contact</span>
+                <span className="font-bold text-slate-900 text-sm">{ward.whatsappNo || 'Not Provided'}</span>
+              </div>
+
+              <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">Secondary Contact</span>
+                <span className="font-bold text-slate-900 text-sm">{ward.motherWhatsappNo || 'Not Provided'}</span>
+              </div>
             </div>
           </div>
-          <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap justify-end">
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full px-2 py-0.5">
-              <UserCheck size={10} /> {classTeacherName}
+
+          {/* Fee Overview Card */}
+          <div className="bg-white border border-slate-200 rounded-xl shadow-card p-5">
+            <div className="flex items-center justify-between pb-3.5 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <CreditCard size={16} className="text-blue-600" />
+                <h3 className="text-sm font-bold text-slate-900 m-0">Term Fee Overview</h3>
+              </div>
+              <span className={cn('text-xs font-bold px-2 py-0.5 rounded-full', isFeeCleared ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700')}>
+                {isFeeCleared ? '✓ Cleared' : 'Pending Payment'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3 my-4">
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-center">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Fee</div>
+                <div className="text-base font-extrabold text-slate-900 mt-0.5">₹{totalFee.toLocaleString()}</div>
+              </div>
+              <div className="p-3 bg-emerald-50/60 rounded-xl border border-emerald-100 text-center">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Fee Paid</div>
+                <div className="text-base font-extrabold text-emerald-700 mt-0.5">₹{ward.feePaid.toLocaleString()}</div>
+              </div>
+              <div className="p-3 bg-rose-50/60 rounded-xl border border-rose-100 text-center">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-rose-600">Balance Due</div>
+                <div className="text-base font-extrabold text-rose-700 mt-0.5">
+                  {isFeeCleared ? '₹0' : `₹${ward.feePending.toLocaleString()}`}
+                </div>
+              </div>
+            </div>
+
+            {/* Progress Bar */}
+            <div className="pt-2">
+              <div className="flex items-center justify-between text-xs mb-1.5">
+                <span className="font-semibold text-slate-600 flex items-center gap-1">
+                  <TrendingUp size={12} className="text-slate-400" /> Payment Completion
+                </span>
+                <span className="font-bold text-slate-900">{feePaidPct}%</span>
+              </div>
+              <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                <div
+                  className={cn(
+                    'h-full rounded-full transition-all duration-700',
+                    feePaidPct === 100 ? 'bg-emerald-500' : feePaidPct >= 50 ? 'bg-blue-600' : 'bg-amber-500'
+                  )}
+                  style={{ width: `${feePaidPct}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ─── RIGHT COLUMN: Faculty Support & Upcoming Dates ─── */}
+        <div className="flex flex-col gap-5">
+          {/* Class Teacher Card */}
+          <div className="bg-white border border-slate-200 rounded-xl shadow-card p-4">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-3">
+              Assigned Faculty
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center justify-center font-bold text-sm flex-shrink-0">
+                {getInitials(classTeacherName)}
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-bold text-slate-900 truncate">{classTeacherName}</div>
+                <div className="text-xs text-slate-500 truncate mt-0.5">
+                  Class Teacher · {formatClassName(ward.class, ward.section)}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3.5 flex flex-col gap-2">
               {teacherPhone && (
-                <a href={`tel:${teacherPhone}`} className="text-emerald-700 font-bold hover:underline ml-0.5">
-                  · {teacherPhone}
+                <a
+                  href={`tel:${teacherPhone}`}
+                  className="flex items-center justify-center gap-2 h-8 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 text-xs font-semibold hover:bg-slate-100 transition-colors"
+                >
+                  <Phone size={12} className="text-emerald-600" /> {teacherPhone}
                 </a>
               )}
-            </span>
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200 rounded-full px-2 py-0.5">
-              {ward.transportMode === 'school' ? <><Bus size={10} /> Bus</> : <><Car size={10} /> Private</>}
-            </span>
-          </div>
-        </div>
-
-        {/* Class Teacher contact banner */}
-        <div className="px-4 py-2.5 bg-slate-50/70 border-t border-slate-100 flex items-center justify-between text-xs flex-wrap gap-2">
-          <div className="flex items-center gap-2 flex-wrap">
-            <UserCheck size={14} className="text-indigo-600 flex-shrink-0" />
-            <span className="font-semibold text-slate-700">Class Teacher:</span>
-            <span className="font-bold text-slate-900">{classTeacherName}</span>
-            {teacherPhone && (
-              <a
-                href={`tel:${teacherPhone}`}
-                className="inline-flex items-center gap-1 font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.2 hover:bg-emerald-100 transition-colors"
-              >
-                <Phone size={10} className="text-emerald-600" /> {teacherPhone}
-              </a>
-            )}
-          </div>
-          <div className="flex items-center gap-3">
-            {teacherEmail && (
-              <span className="flex items-center gap-1 text-slate-500">
-                <Mail size={11} className="text-indigo-500" /> {teacherEmail}
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Fee stats */}
-        <div className="grid grid-cols-3 border-t border-slate-100 divide-x divide-slate-100">
-          {[
-            { label: 'Books Fee', value: `₹${(ward.booksFee || 0).toLocaleString()}`, cls: 'text-blue-600' },
-            { label: 'Fee Paid', value: `₹${ward.feePaid.toLocaleString()}`, cls: 'text-emerald-600' },
-            {
-              label: 'Pending',
-              value: ward.feePending > 0 ? `₹${ward.feePending.toLocaleString()}` : 'Cleared ✓',
-              cls: ward.feePending > 0 ? 'text-red-600' : 'text-emerald-600',
-            },
-          ].map((item) => (
-            <div key={item.label} className="px-4 py-2.5">
-              <div className="text-[9px] font-bold uppercase tracking-widest text-slate-400">{item.label}</div>
-              <div className={cn('text-sm font-extrabold mt-0.5', item.cls)}>{item.value}</div>
+              {teacherEmail && (
+                <a
+                  href={`mailto:${teacherEmail}`}
+                  className="flex items-center justify-center gap-2 h-8 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 text-xs font-semibold hover:bg-slate-100 transition-colors"
+                >
+                  <Mail size={12} className="text-indigo-600" /> {teacherEmail}
+                </a>
+              )}
             </div>
-          ))}
-        </div>
+          </div>
 
-        {/* Progress bar */}
-        <div className="px-4 pb-3 pt-2 border-t border-slate-100">
-          <div className="flex items-center justify-between text-[10px] mb-1">
-            <span className="font-semibold text-slate-500 flex items-center gap-1">
-              <TrendingUp size={10} className="text-slate-400" /> Fee Payment Progress
-            </span>
-            <span className="font-bold" style={{ color: progressColor }}>{feePaidPct}%</span>
-          </div>
-          <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-            <div
-              className="h-full rounded-full transition-all duration-700"
-              style={{ width: `${feePaidPct}%`, background: progressColor }}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Upcoming Events */}
-      {visibleEvents.length > 0 && (
-        <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-slate-100 bg-slate-50/60">
-            <CalendarDays size={13} className="text-slate-400" />
-            <span className="text-xs font-bold text-slate-700">Upcoming Events</span>
-            <span className="ml-auto text-[10px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">
-              {visibleEvents.length}
-            </span>
-          </div>
-          <div className="divide-y divide-slate-50">
-            {visibleEvents.map((ev) => (
-              <div key={ev._id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 transition-colors">
-                <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 flex-shrink-0" />
-                <span className="flex-1 text-xs font-semibold text-slate-800 truncate">{ev.title}</span>
-                <span className="text-[10px] text-slate-400 flex-shrink-0">
-                  {new Date(ev.date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' })}
+          {/* School Events Card */}
+          {visibleEvents.length > 0 && (
+            <div className="bg-white border border-slate-200 rounded-xl shadow-card p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-xs font-bold text-slate-800">Upcoming School Dates</div>
+                <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">
+                  {visibleEvents.length}
                 </span>
               </div>
-            ))}
-          </div>
+              <div className="flex flex-col gap-2">
+                {visibleEvents.map((ev) => (
+                  <div key={ev._id} className="flex items-center gap-2.5 p-2 rounded-lg bg-slate-50 border border-slate-100">
+                    <Calendar size={13} className="text-blue-600 flex-shrink-0" />
+                    <span className="flex-1 text-xs font-semibold text-slate-800 truncate">{ev.title}</span>
+                    <span className="text-[10px] text-slate-400 flex-shrink-0">
+                      {new Date(ev.date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 };

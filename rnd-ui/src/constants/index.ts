@@ -8,8 +8,9 @@ export const API_BASE =
 
 export const formatClassName = (className: string, section?: string): string => {
   if (!className) return '';
-  const formattedClass = isNaN(Number(className)) ? className : `Class ${className}`;
-  if (!section || section === '-') {
+  const cleanClass = className.replace(/^class\s+/i, '').trim();
+  const formattedClass = isNaN(Number(cleanClass)) ? cleanClass : `Class ${cleanClass}`;
+  if (!section || section === '-' || section === '--') {
     return formattedClass;
   }
   return `${formattedClass} - ${section}`;

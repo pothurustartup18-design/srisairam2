@@ -186,6 +186,8 @@ const AdminMarks: React.FC<AdminMarksProps> = ({ students, teachers, classesList
   const [studentRemarks,     setStudentRemarks]     = useState<Record<string, string>>({});
   const [validationErrors,   setValidationErrors]   = useState<Record<string, Record<string, boolean>>>({});
   const [generatingStudentId,setGeneratingStudentId]= useState<string | null>(null);
+  const [downloadingBulkPdf,  setDownloadingBulkPdf]  = useState(false);
+  const [downloadingSingleStudentId, setDownloadingSingleStudentId] = useState<string | null>(null);
   const [sharingStudentId,   setSharingStudentId]   = useState<string | null>(null);
   const [sendingWhatsappId,  setSendingWhatsappId]  = useState<string | null>(null);
   const [previewUrl,         setPreviewUrl]         = useState<string | null>(null);
@@ -377,121 +379,60 @@ const AdminMarks: React.FC<AdminMarksProps> = ({ students, teachers, classesList
     finally { setSaving(false); }
   };
 
-  const autoSaveGrades = async (): Promise<boolean> => {
-    if (!selectedExam || !assignedTeacher) return false;
-    const hasErrors = Object.values(validationErrors).some(se => Object.values(se).some(Boolean));
-    if (hasErrors) { showToast('Correct input errors before generating report cards.', 'error'); return false; }
-    const payload = {
-      examName: selectedExam.examName, classTeacherId: assignedTeacher._id, class: roomName, subjects: selectedExam.subjects,
-      studentMarks: classStudents.map(s => {
-        const grades = studentGrades[s.id] || {};
-        return { studentId: s.id, marks: selectedExam.subjects.map(sub => ({ subject: sub.name, obtainedMarks: grades[sub.name] !== undefined && grades[sub.name] !== '' ? Number(grades[sub.name]) : 0 })), remarks: studentRemarks[s.id] || '' };
-      }),
-    };
-    try {
-      const token = getAccessToken();
-      const headers: HeadersInit = { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
-      const res  = await fetch(`${API_BASE}/marks`, { method: 'POST', headers, body: JSON.stringify(payload) });
-      const data = await res.json();
-      return data.success;
-    } catch {
-      return false;
-    }
-  };
-
   const handleGenerateStudentPDF = async (student: StudentData) => {
     if (!selectedExam) return;
     setGeneratingStudentId(student.id);
-    try {
-      const saved = await autoSaveGrades();
-      if (!saved) {
-        showToast('Failed to auto-save grades/remarks.', 'error');
-        return;
-      }
-      await handleLoadExamDetails(selectedExam._id);
-      await uploadSingleStudentReportPDF(selectedExam, student, studentRemarks, assignedTeacher?.name || 'Class Teacher');
-      showToast(`Report card generated for ${student.name}!`);
-      await handleLoadExamDetails(selectedExam._id);
-    }
+    try { await uploadSingleStudentReportPDF(selectedExam, student, studentRemarks, assignedTeacher?.name || 'Class Teacher'); showToast(`Report card generated for ${student.name}!`); handleLoadExamDetails(selectedExam._id); }
     catch (err: any) { showToast(err.message || 'Generation failed', 'error'); }
     finally { setGeneratingStudentId(null); }
   };
 
   const handleDownloadBulkPDF = async () => {
     if (!selectedExam || classStudents.length === 0) { showToast('No students found.', 'error'); return; }
+    setDownloadingBulkPdf(true);
     try {
-      const saved = await autoSaveGrades();
-      if (!saved) {
-        showToast('Failed to auto-save grades/remarks before bulk download.', 'error');
-        return;
-      }
-      await handleLoadExamDetails(selectedExam._id);
       await generateReportCardPDF(selectedExam, classStudents, studentRemarks, assignedTeacher?.name || 'Class Teacher');
-      showToast('Bulk PDF downloaded!');
+      showToast('Bulk Report Cards PDF downloaded successfully!', 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to generate Bulk PDF.', 'error');
+    } finally {
+      setDownloadingBulkPdf(false);
     }
-    catch (err) { console.error(err); showToast('Failed to generate PDF.', 'error'); }
   };
 
   const handleDownloadSinglePDF = async (student: StudentData) => {
     if (!selectedExam) return;
+    setDownloadingSingleStudentId(student.id);
     try {
-      const saved = await autoSaveGrades();
-      if (!saved) {
-        showToast('Failed to auto-save grades/remarks.', 'error');
-        return;
-      }
-      await handleLoadExamDetails(selectedExam._id);
       await generateSingleStudentReportPDF(selectedExam, student, studentRemarks, assignedTeacher?.name || 'Class Teacher');
-      showToast(`Downloaded for ${student.name}.`);
+      showToast(`Downloaded report card for ${student.name}.`, 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to download PDF.', 'error');
+    } finally {
+      setDownloadingSingleStudentId(null);
     }
-    catch (err) { console.error(err); showToast('Failed.', 'error'); }
   };
 
   const handleUploadAndSharePDF = async (student: StudentData) => {
     if (!selectedExam) return;
     setSharingStudentId(student.id);
-    try {
-      const saved = await autoSaveGrades();
-      if (!saved) {
-        showToast('Failed to auto-save grades/remarks.', 'error');
-        return;
-      }
-      await handleLoadExamDetails(selectedExam._id);
-      const url = await uploadSingleStudentReportPDF(selectedExam, student, studentRemarks, assignedTeacher?.name || 'Class Teacher');
-      showToast(`PDF uploaded! Link: ${url}`);
-      await handleLoadExamDetails(selectedExam._id);
-    }
+    try { const url = await uploadSingleStudentReportPDF(selectedExam, student, studentRemarks, assignedTeacher?.name || 'Class Teacher'); showToast(`PDF uploaded! Link: ${url}`); }
     catch (err: any) { showToast(err.message || 'Upload failed', 'error'); }
     finally { setSharingStudentId(null); }
   };
 
-  const handleSendWhatsAppAlert = async (student: StudentData, existingPdfUrl?: string) => {
+  const handleSendWhatsAppAlert = async (student: StudentData, pdfUrl: string) => {
     setSendingWhatsappId(student.id);
     const studentName = student.name || `${student.firstName || ''} ${student.lastName || ''}`.trim();
+    const messageText = `Dear Parent, the report card for ${studentName} for "${selectedExam?.examName}" is ready: ${pdfUrl}`;
     try {
-      if (!selectedExam) throw new Error('No exam selected');
-
-      // Ensure the report-card PDF is generated + stored against this student
-      // (POST /marks/upload-pdf persists studentMarks.pdfUrl) before dispatching.
-      if (!existingPdfUrl) {
-        showToast('Generating report card before sending...', 'success');
-        await uploadSingleStudentReportPDF(selectedExam, student, studentRemarks, assignedTeacher?.name || 'Class Teacher');
-        await handleLoadExamDetails(selectedExam._id);
-      }
-
       const token = getAccessToken();
       const headers: HeadersInit = { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
-
-      // Proactive delivery goes out as the approved `report_card_notice` Meta
-      // template (DOCUMENT header = the report-card PDF), via the
-      // queue → worker → whatsapp.service pipeline (same endpoint the Teacher portal uses).
-      const res = await fetch(`${API_BASE}/marks/${selectedExam._id}/report-card/${student.id}/whatsapp`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({}),
-      });
-      const d = await res.json();
-      if (res.ok && d.success) showToast(`Report card WhatsApp sent to ${studentName}'s parent!`);
+      const res = await fetch(`${API_BASE}/messages/student/${student.id}/whatsapp`, { method: 'POST', headers, body: JSON.stringify({ text: messageText }) });
+      const d   = await res.json();
+      if (res.ok && d.success) showToast(`WhatsApp alert sent to ${studentName}'s parent!`);
       else throw new Error(d.message || 'Failed');
     } catch (err: any) { showToast(err.message || 'Failed.', 'error'); }
     finally { setSendingWhatsappId(null); }
@@ -558,7 +499,7 @@ const AdminMarks: React.FC<AdminMarksProps> = ({ students, teachers, classesList
     <div className="flex flex-col gap-6 font-sans text-slate-900 dark:text-white">
 
       {/* ═══════════════════════ LIST VIEW (stays visible behind the New Exam drawer) ══ */}
-      {activeStep === 'list' && (
+      {(activeStep === 'list' || showCreateDrawer) && (
         <>
           {/* Page title bar with class/section selector inline — eliminates a separate filter block */}
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -990,8 +931,9 @@ const AdminMarks: React.FC<AdminMarksProps> = ({ students, teachers, classesList
                   {lockingExamId === selectedExam._id ? <Loader2 size={12} className="animate-spin" /> : selectedExam.status === 'locked' ? <Unlock size={12} /> : <Lock size={12} />}
                   {selectedExam.status === 'locked' ? 'Unlock' : 'Lock Exam'}
                 </button>
-                <Button size="sm" variant="secondary" onClick={handleDownloadBulkPDF}>
-                  <FileDown size={13} /> Bulk PDF
+                <Button size="sm" variant="secondary" disabled={downloadingBulkPdf} onClick={handleDownloadBulkPDF}>
+                  {downloadingBulkPdf ? <Loader2 size={13} className="animate-spin text-blue-600" /> : <FileDown size={13} />}
+                  {downloadingBulkPdf ? 'Generating PDFs...' : 'Bulk PDF'}
                 </Button>
               </div>
             </div>
@@ -1081,8 +1023,8 @@ const AdminMarks: React.FC<AdminMarksProps> = ({ students, teachers, classesList
                           {!hasPdf ? (
                             /* No PDF yet — show Generate as the only action */
                             <Button size="sm" type="button" disabled={generatingStudentId === s.id} onClick={() => handleGenerateStudentPDF(s)}>
-                              {generatingStudentId === s.id ? <Loader2 size={11} className="animate-spin" /> : null}
-                              Generate
+                              {generatingStudentId === s.id ? <Loader2 size={11} className="animate-spin mr-1" /> : null}
+                              {generatingStudentId === s.id ? 'Generating...' : 'Generate'}
                             </Button>
                           ) : (
                             /* PDF exists — show status chip + action icons */
@@ -1090,8 +1032,8 @@ const AdminMarks: React.FC<AdminMarksProps> = ({ students, teachers, classesList
                               <span className="flex items-center gap-0.5 text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full mr-1">
                                 <CheckCircle size={10} /> PDF
                               </span>
-                              <button className={iconActionBtn('text-slate-500', 'border-slate-200', 'hover:bg-slate-50')} title="Download" onClick={() => handleDownloadSinglePDF(s)}>
-                                <Download size={12} />
+                              <button className={iconActionBtn('text-slate-500', 'border-slate-200', 'hover:bg-slate-50')} title="Download PDF" disabled={downloadingSingleStudentId === s.id} onClick={() => handleDownloadSinglePDF(s)}>
+                                {downloadingSingleStudentId === s.id ? <Loader2 size={12} className="animate-spin text-blue-600" /> : <Download size={12} />}
                               </button>
                               <button className={iconActionBtn('text-blue-600', 'border-blue-200', 'hover:bg-blue-50')} title="Preview" onClick={() => { setPreviewUrl(sRecord!.pdfUrl!); setPreviewStudentName(s.name); }}>
                                 <Eye size={12} />
@@ -1183,16 +1125,16 @@ const AdminMarks: React.FC<AdminMarksProps> = ({ students, teachers, classesList
                         actions={
                           !hasPdf ? (
                             <Button size="sm" type="button" disabled={generatingStudentId === s.id} onClick={() => handleGenerateStudentPDF(s)} className="w-full justify-center">
-                              {generatingStudentId === s.id ? <Loader2 size={13} className="animate-spin" /> : null}
-                              Generate Report Card
+                              {generatingStudentId === s.id ? <Loader2 size={13} className="animate-spin mr-1" /> : null}
+                              {generatingStudentId === s.id ? 'Generating...' : 'Generate Report Card'}
                             </Button>
                           ) : (
                             <>
                               <span className="flex items-center gap-0.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1.5 rounded-full">
                                 <CheckCircle size={11} /> PDF Ready
                               </span>
-                              <button className={iconActionBtn('text-slate-500', 'border-slate-200', 'hover:bg-slate-50') + ' !h-11 !w-11'} title="Download" onClick={() => handleDownloadSinglePDF(s)}>
-                                <Download size={14} />
+                              <button className={iconActionBtn('text-slate-500', 'border-slate-200', 'hover:bg-slate-50') + ' !h-11 !w-11'} title="Download PDF" disabled={downloadingSingleStudentId === s.id} onClick={() => handleDownloadSinglePDF(s)}>
+                                {downloadingSingleStudentId === s.id ? <Loader2 size={14} className="animate-spin text-blue-600" /> : <Download size={14} />}
                               </button>
                               <button className={iconActionBtn('text-blue-600', 'border-blue-200', 'hover:bg-blue-50') + ' !h-11 !w-11'} title="Preview" onClick={() => { setPreviewUrl(sRecord!.pdfUrl!); setPreviewStudentName(s.name); }}>
                                 <Eye size={14} />

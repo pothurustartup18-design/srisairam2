@@ -138,10 +138,15 @@ const ParentAccountProfile: React.FC<ParentAccountProfileProps> = ({ showToast }
   }
 
   return (
-    <div className="w-full max-w-3xl flex flex-col gap-4 font-sans text-slate-900">
-      <div>
-        <h1 className="text-xl font-extrabold text-slate-900 tracking-tight">My Profile</h1>
-        <p className="text-xs text-slate-500 mt-0.5">View your registered contact numbers and manage account security.</p>
+    <div className="w-full max-w-4xl flex flex-col gap-5 font-sans text-slate-900">
+      {/* ─── PAGE HEADER (Matches Admin Style) ─── */}
+      <div className="flex items-start justify-between gap-4 flex-wrap bg-white border border-slate-200 rounded-xl px-6 py-5 shadow-card">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900 m-0">Parent Account &amp; Security</h2>
+          <p className="text-sm text-slate-500 mt-1">
+            View your registered WhatsApp contact numbers and manage parent account authentication credentials.
+          </p>
+        </div>
       </div>
 
       <SectionCard>

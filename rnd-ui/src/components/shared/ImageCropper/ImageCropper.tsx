@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Check, Plus, Minus, Upload } from 'lucide-react';
+import { X, RotateCcw, Check, Plus, Minus, Upload } from 'lucide-react';
 import './ImageCropper.css';
 
 interface ImageCropperProps {

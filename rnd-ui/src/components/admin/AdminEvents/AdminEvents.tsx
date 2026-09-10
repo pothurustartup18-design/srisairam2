@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   Image as ImageIcon, Film, Music, FileText, X, Megaphone, Calendar,
-  Trash2, BellOff, Users, GraduationCap, Globe, Clock, Plus
+  Trash2, BellOff, Users, GraduationCap, Globe, Clock, Send, Plus
 } from 'lucide-react';
 import type { EventData, ClassData } from '../../../types';
 import { sortClasses } from '../../../constants';
@@ -288,7 +288,7 @@ const AdminEvents: React.FC<AdminEventsProps> = ({
               <div key={n._id} className="bg-white border border-slate-200 rounded-lg p-4 hover:shadow-sm transition-shadow">
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <div className="flex items-center gap-2">
-                    <Badge variant="purple" size="sm">Notice</Badge>
+                    <Badge variant="indigo" size="sm">Notice</Badge>
                     <span className="text-[11px] text-slate-400">
                       {new Date(n.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
                     </span>

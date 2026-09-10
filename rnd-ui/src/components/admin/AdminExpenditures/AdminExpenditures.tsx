@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { Button, PageHeader, Badge, DataTable, Th, Td, Tr, EmptyState, LoadingSpinner, Modal, KpiCard } from '../../ui';
 import { API_BASE } from '../../../constants';
+import { getLocalToday, getLocalMonth } from '../../../lib/utils';
 
 interface AdminExpendituresProps {
   showToast: (message: string, type?: 'success' | 'error') => void;
@@ -51,8 +52,8 @@ interface TrendPoint {
   netProfit: number;
 }
 
-const currentMonth = () => new Date().toISOString().slice(0, 7); // 'YYYY-MM'
-const today = () => new Date().toISOString().slice(0, 10); // 'YYYY-MM-DD'
+const currentMonth = () => getLocalMonth(); // 'YYYY-MM'
+const today = () => getLocalToday(); // 'YYYY-MM-DD'
 const rupees = (n: number) => `₹${n.toLocaleString()}`;
 
 const TABS = [
@@ -207,77 +208,183 @@ export default function AdminExpenditures({ showToast }: AdminExpendituresProps)
       disabled={busy}
       onClick={onClick}
       title={paid ? 'Mark as unpaid' : 'Mark as paid'}
-      className={`w-6 h-6 rounded flex items-center justify-center border-2 transition-colors disabled:opacity-50 ${
-        paid ? 'bg-green-600 border-green-600 text-white' : 'bg-white border-slate-300 hover:border-slate-400'
-      }`}
+      className={`w-6 h-6 rounded flex items-center justify-center border-2 transition-colors disabled:opacity-50 ${paid ? 'bg-green-600 border-green-600 text-white' : 'bg-white border-slate-300 hover:border-slate-400'
+        }`}
     >
       {paid && <Check size={14} strokeWidth={3} />}
     </button>
   );
 
   const TrendChart = ({ data }: { data: TrendPoint[] }) => {
-    const [hover, setHover] = useState<{ x: number; y: number; text: string } | null>(null);
-    const maxVal = Math.max(...data.map((d) => Math.max(d.income, d.salaryPaid, d.variablePaid)), 1);
-    const chartW = 500;
-    const chartH = 220;
-    const baseline = 190;
-    const barGroupW = chartW / data.length;
-    const barW = 13;
-    const gap = 4;
-    const groupStart = (barGroupW - (barW * 3 + gap * 2)) / 2;
+    const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+    const rawMax = Math.max(...data.map((d) => Math.max(d.income || 0, d.salaryPaid || 0, d.variablePaid || 0)), 1000);
+    const maxVal = Math.ceil(rawMax * 1.15);
+
+    const formatYAxis = (val: number) => {
+      if (val === 0) return '₹0';
+      if (val >= 10000000) return `₹${(val / 10000000).toFixed(1).replace(/\.0$/, '')}Cr`;
+      if (val >= 100000) return `₹${(val / 100000).toFixed(1).replace(/\.0$/, '')}L`;
+      if (val >= 1000) return `₹${(val / 1000).toFixed(0)}k`;
+      return `₹${val}`;
+    };
+
+    const formatCompactCurrency = (val: number) => {
+      const abs = Math.abs(val);
+      let formatted = '';
+      if (abs >= 10000000) formatted = `₹${(abs / 10000000).toFixed(2).replace(/\.00$/, '')}Cr`;
+      else if (abs >= 100000) formatted = `₹${(abs / 100000).toFixed(2).replace(/\.00$/, '')}L`;
+      else if (abs >= 1000) formatted = `₹${(abs / 1000).toFixed(1).replace(/\.0$/, '')}k`;
+      else formatted = `₹${abs.toLocaleString('en-IN')}`;
+      return `${val > 0 ? '+' : val < 0 ? '−' : ''}${formatted}`;
+    };
+
+    const yTicks = [maxVal, maxVal * 0.66, maxVal * 0.33, 0];
 
     return (
-      <div className="relative">
-        <svg viewBox={`0 0 ${chartW} ${chartH + 30}`} className="w-full h-auto">
-          <line x1="30" y1={baseline} x2={chartW - 10} y2={baseline} stroke="#e2e8f0" strokeWidth="1.5" />
-          {data.map((d, idx) => {
-            const groupX = 30 + idx * barGroupW + groupStart;
-            const incomeH = (d.income / maxVal) * (baseline - 20);
-            const salaryH = (d.salaryPaid / maxVal) * (baseline - 20);
-            const varH = (d.variablePaid / maxVal) * (baseline - 20);
-            return (
-              <g key={d.month}>
-                <rect
-                  x={groupX} y={baseline - incomeH} width={barW} height={incomeH} rx="2" fill="#16a34a"
-                  onMouseEnter={(e) => setHover({ x: e.clientX, y: e.clientY, text: `Income: ${rupees(d.income)}` })}
-                  onMouseLeave={() => setHover(null)}
-                />
-                <rect
-                  x={groupX + barW + gap} y={baseline - salaryH} width={barW} height={salaryH} rx="2" fill="#2563eb"
-                  onMouseEnter={(e) => setHover({ x: e.clientX, y: e.clientY, text: `Salaries Paid: ${rupees(d.salaryPaid)}` })}
-                  onMouseLeave={() => setHover(null)}
-                />
-                <rect
-                  x={groupX + (barW + gap) * 2} y={baseline - varH} width={barW} height={varH} rx="2" fill="#f59e0b"
-                  onMouseEnter={(e) => setHover({ x: e.clientX, y: e.clientY, text: `Variable Paid: ${rupees(d.variablePaid)}` })}
-                  onMouseLeave={() => setHover(null)}
-                />
-                <text x={30 + idx * barGroupW + barGroupW / 2} y={baseline + 16} textAnchor="middle" fontSize="10" fontWeight="600" fill="#64748b">
-                  {d.monthLabel.split(' ')[0]}
-                </text>
-                <text
-                  x={30 + idx * barGroupW + barGroupW / 2} y={baseline + 30} textAnchor="middle" fontSize="9.5" fontWeight="700"
-                  fill={d.netProfit >= 0 ? '#16a34a' : '#dc2626'}
-                >
-                  {d.netProfit >= 0 ? '+' : '−'}{rupees(Math.abs(d.netProfit)).replace('₹', '')}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
-        {hover && (
-          <div
-            className="fixed z-50 bg-slate-900 text-white text-xs font-semibold rounded px-2 py-1 pointer-events-none"
-            style={{ left: hover.x + 12, top: hover.y - 28 }}
-          >
-            {hover.text}
+      <div className="flex flex-col select-none">
+        {/* Chart Viewport */}
+        <div className="relative h-56 sm:h-60 flex">
+          {/* Y-Axis Labels */}
+          <div className="flex flex-col justify-between items-end pr-2.5 pb-8 text-[10px] font-bold text-slate-400 w-12 flex-shrink-0 select-none">
+            {yTicks.map((tick, i) => (
+              <span key={i} className="leading-none">
+                {formatYAxis(tick)}
+              </span>
+            ))}
           </div>
-        )}
-        <div className="flex gap-4 justify-center text-xs font-semibold mt-1 flex-wrap">
-          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-green" /> Income</span>
-          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-blue" /> Salaries Paid</span>
-          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-amber" /> Variable Bills Paid</span>
-          <span className="text-slate-400 font-normal">(net profit shown below each month)</span>
+
+          {/* Chart Grid & Bars */}
+          <div className="relative flex-1 flex flex-col justify-between">
+            {/* Horizontal Gridlines */}
+            <div className="absolute inset-x-0 top-0 bottom-8 flex flex-col justify-between pointer-events-none">
+              <div className="border-b border-slate-100 w-full" />
+              <div className="border-b border-slate-100 w-full border-dashed" />
+              <div className="border-b border-slate-100 w-full border-dashed" />
+              <div className="border-b border-slate-200 w-full" />
+            </div>
+
+            {/* Month Columns */}
+            <div className="relative z-10 flex items-end justify-around h-full pb-8 pt-4 px-2 gap-2">
+              {data.map((d, idx) => {
+                const isHovered = hoveredIdx === idx;
+                const incomeH = d.income > 0 ? Math.min(100, Math.max(4, Math.round((d.income / maxVal) * 100))) : 0;
+                const salaryH = d.salaryPaid > 0 ? Math.min(100, Math.max(4, Math.round((d.salaryPaid / maxVal) * 100))) : 0;
+                const varH = d.variablePaid > 0 ? Math.min(100, Math.max(4, Math.round((d.variablePaid / maxVal) * 100))) : 0;
+
+                return (
+                  <div
+                    key={d.month}
+                    className="flex-1 flex flex-col items-center justify-end h-full relative group cursor-pointer max-w-[80px]"
+                    onMouseEnter={() => setHoveredIdx(idx)}
+                    onMouseLeave={() => setHoveredIdx(null)}
+                  >
+                    {/* Tooltip */}
+                    {isHovered && (
+                      <div className="absolute -top-24 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[11px] rounded-lg shadow-xl z-30 p-2.5 whitespace-nowrap pointer-events-none border border-slate-700 min-w-[150px]">
+                        <div className="font-bold text-slate-200 pb-1 border-b border-slate-700 mb-1.5 flex justify-between">
+                          <span>{d.monthLabel}</span>
+                          <span className={d.netProfit >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                            {d.netProfit >= 0 ? 'Profit' : 'Loss'}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3 text-[10.5px]">
+                          <span className="flex items-center gap-1 text-slate-300">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500" /> Income:
+                          </span>
+                          <span className="font-semibold text-emerald-400">{rupees(d.income)}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3 text-[10.5px] mt-0.5">
+                          <span className="flex items-center gap-1 text-slate-300">
+                            <span className="w-2 h-2 rounded-full bg-blue-500" /> Salaries:
+                          </span>
+                          <span className="font-semibold text-blue-300">{rupees(d.salaryPaid)}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3 text-[10.5px] mt-0.5">
+                          <span className="flex items-center gap-1 text-slate-300">
+                            <span className="w-2 h-2 rounded-full bg-amber-500" /> Variable:
+                          </span>
+                          <span className="font-semibold text-amber-300">{rupees(d.variablePaid)}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3 text-[10.5px] mt-1 pt-1 border-t border-slate-800">
+                          <span className="font-semibold text-slate-400">Net Profit:</span>
+                          <span className={`font-bold ${d.netProfit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {d.netProfit >= 0 ? '+' : '−'}{rupees(Math.abs(d.netProfit))}
+                          </span>
+                        </div>
+                        <div className="w-2 h-2 bg-slate-900 rotate-45 absolute -bottom-1 left-1/2 -translate-x-1/2 border-r border-b border-slate-700" />
+                      </div>
+                    )}
+
+                    {/* Bars Slot */}
+                    <div className="flex items-end justify-center gap-1 h-full w-full">
+                      {/* Income Bar */}
+                      <div className="w-2.5 sm:w-3.5 h-full flex items-end justify-center">
+                        {d.income > 0 ? (
+                          <div
+                            className="w-full bg-emerald-500 hover:bg-emerald-600 rounded-t transition-all duration-200"
+                            style={{ height: `${incomeH}%` }}
+                          />
+                        ) : (
+                          <div className="w-full h-0.5 bg-slate-200 rounded-full" />
+                        )}
+                      </div>
+
+                      {/* Salary Bar */}
+                      <div className="w-2.5 sm:w-3.5 h-full flex items-end justify-center">
+                        {d.salaryPaid > 0 ? (
+                          <div
+                            className="w-full bg-blue-600 hover:bg-blue-700 rounded-t transition-all duration-200"
+                            style={{ height: `${salaryH}%` }}
+                          />
+                        ) : (
+                          <div className="w-full h-0.5 bg-slate-200 rounded-full" />
+                        )}
+                      </div>
+
+                      {/* Variable Bar */}
+                      <div className="w-2.5 sm:w-3.5 h-full flex items-end justify-center">
+                        {d.variablePaid > 0 ? (
+                          <div
+                            className="w-full bg-amber-500 hover:bg-amber-600 rounded-t transition-all duration-200"
+                            style={{ height: `${varH}%` }}
+                          />
+                        ) : (
+                          <div className="w-full h-0.5 bg-slate-200 rounded-full" />
+                        )}
+                      </div>
+                    </div>
+
+                    {/* X-Axis Month Label & Net Profit */}
+                    <div className="absolute -bottom-7 flex flex-col items-center whitespace-nowrap">
+                      <span className={`text-[11px] font-bold ${isHovered ? 'text-slate-900' : 'text-slate-600'}`}>
+                        {d.monthLabel.split(' ')[0]}
+                      </span>
+                      <span
+                        className={`text-[10px] font-bold ${d.netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'
+                          }`}
+                      >
+                        {formatCompactCurrency(d.netProfit)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Legend */}
+        <div className="flex items-center justify-center gap-4 sm:gap-6 text-xs font-semibold text-slate-600 mt-5 pt-3 border-t border-slate-100 flex-wrap">
+          <span className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500" /> Income
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-sm bg-blue-600" /> Salaries Paid
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-sm bg-amber-500" /> Variable Bills Paid
+          </span>
+          <span className="text-slate-400 font-normal text-[11px]">(net profit/deficit shown below each month)</span>
         </div>
       </div>
     );
@@ -289,28 +396,33 @@ export default function AdminExpenditures({ showToast }: AdminExpendituresProps)
       type="month"
       value={month}
       onChange={(e) => setMonth(e.target.value)}
-      className="border border-slate-200 rounded-md px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-200"
+      className="border border-slate-200 rounded-lg px-3 py-1.5 text-xs sm:text-sm font-semibold text-slate-700 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
     />
   );
 
   return (
-    <div className="flex flex-col gap-5 font-sans text-slate-900">
-      <PageHeader title="Expenditure" subtitle="Staff salaries and variable bills." />
+    <div className="flex flex-col gap-4 font-sans text-slate-900">
+      <PageHeader title="Expenditure" subtitle="Staff salaries, variable bills, and monthly cash flow." />
 
-      <div className="flex items-center gap-2 border-b border-slate-200">
-        {TABS.map(({ key, label, Icon }) => (
-          <button
-            key={key}
-            onClick={() => setActiveTab(key)}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors ${
-              activeTab === key
+      <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-px flex-wrap">
+        <div className="flex items-center gap-1">
+          {TABS.map(({ key, label, Icon }) => (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              className={`flex items-center gap-1.5 px-3.5 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors ${activeTab === key
                 ? 'border-blue text-blue'
                 : 'border-transparent text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            <Icon size={15} /> {label}
-          </button>
-        ))}
+                }`}
+            >
+              <Icon size={15} /> {label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 pb-1">
+          <span className="text-xs font-semibold text-slate-500">Selected Month:</span>
+          {monthPicker}
+        </div>
       </div>
 
       {loading ? (
@@ -318,90 +430,166 @@ export default function AdminExpenditures({ showToast }: AdminExpendituresProps)
       ) : (
         <>
           {activeTab === 'dashboard' && summary && (
-            <div className="flex flex-col gap-5">
-              <div className="flex justify-end">{monthPicker}</div>
-
-              {(summary.salary.totalCount - summary.salary.paidCount > 0 || summary.variable.count > 0 && summary.variable.pending > 0) && (
-                <div className="flex flex-col gap-2">
-                  {summary.salary.totalCount - summary.salary.paidCount > 0 && (
-                    <div className="flex items-center gap-2 bg-amber-lt border border-amber-200 text-amber-800 rounded-lg px-4 py-2.5 text-sm font-semibold">
-                      <AlertCircle size={16} className="flex-shrink-0" />
-                      {summary.salary.totalCount - summary.salary.paidCount} of {summary.salary.totalCount} staff still unpaid for {monthLabel}.
-                    </div>
-                  )}
-                  {summary.variable.pending > 0 && (
-                    <div className="flex items-center gap-2 bg-amber-lt border border-amber-200 text-amber-800 rounded-lg px-4 py-2.5 text-sm font-semibold">
-                      <AlertCircle size={16} className="flex-shrink-0" />
-                      {variableExpenses.filter((e) => !e.paid).length} variable bill(s) pending — {rupees(summary.variable.pending)} outstanding.
-                    </div>
-                  )}
+            <div className="flex flex-col gap-4">
+              {/* Unpaid / Pending Alert Banner */}
+              {(summary.salary.totalCount - summary.salary.paidCount > 0 || summary.variable.pending > 0) && (
+                <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-lg px-4 py-2.5 text-xs sm:text-sm font-medium shadow-sm">
+                  <AlertCircle size={16} className="text-amber-600 flex-shrink-0" />
+                  <div className="flex-1 flex flex-wrap items-center gap-x-4 gap-y-1">
+                    {summary.salary.totalCount - summary.salary.paidCount > 0 && (
+                      <span>
+                        <strong className="font-semibold text-amber-950">{summary.salary.totalCount - summary.salary.paidCount} of {summary.salary.totalCount} staff</strong> unpaid for {monthLabel}.
+                      </span>
+                    )}
+                    {summary.variable.pending > 0 && (
+                      <span>
+                        <strong className="font-semibold text-amber-950">{rupees(summary.variable.pending)}</strong> pending across {variableExpenses.filter((e) => !e.paid).length} variable bill(s).
+                      </span>
+                    )}
+                  </div>
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <KpiCard
-                  label={`School Income — ${monthLabel}`}
-                  value={rupees(summary.income)}
-                  subtext="Fees collected this month"
-                  icon={<IndianRupee size={16} />} iconBg="bg-green-lt" iconColor="text-green" valueColor="text-green"
-                />
-                <KpiCard
-                  label={`Total Paid Out — ${monthLabel}`}
-                  value={rupees(summary.combinedOutflowPaid)}
-                  subtext="Salaries + variable bills paid"
-                  icon={<Wallet size={16} />} iconBg="bg-blue-lt" iconColor="text-blue"
-                />
-                <KpiCard
-                  label={`Net Profit — ${monthLabel}`}
-                  value={`${summary.netProfit >= 0 ? '' : '−'}${rupees(Math.abs(summary.netProfit))}`}
-                  subtext="Income minus amount paid out"
-                  icon={summary.netProfit >= 0 ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
-                  iconBg={summary.netProfit >= 0 ? 'bg-green-lt' : 'bg-red-lt'}
-                  iconColor={summary.netProfit >= 0 ? 'text-green' : 'text-red'}
-                  valueColor={summary.netProfit >= 0 ? 'text-green' : 'text-red'}
-                />
+              {/* Primary Summary KPI Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-500">School Income</span>
+                    <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                      <IndianRupee size={16} />
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <div className="text-2xl sm:text-3xl font-extrabold text-emerald-600 leading-tight">
+                      {rupees(summary.income)}
+                    </div>
+                    <div className="text-xs text-slate-400 mt-0.5">Fees collected in {monthLabel}</div>
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-500">Total Paid Out</span>
+                    <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                      <Wallet size={16} />
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 leading-tight">
+                      {rupees(summary.combinedOutflowPaid)}
+                    </div>
+                    <div className="text-xs text-slate-400 mt-0.5">Salaries + variable bills paid</div>
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-500">Net Profit / Balance</span>
+                    <div
+                      className={`w-8 h-8 rounded-lg flex items-center justify-center ${summary.netProfit >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'
+                        }`}
+                    >
+                      {summary.netProfit >= 0 ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <div
+                      className={`text-2xl sm:text-3xl font-extrabold leading-tight ${summary.netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'
+                        }`}
+                    >
+                      {summary.netProfit >= 0 ? '+' : '−'}{rupees(Math.abs(summary.netProfit))}
+                    </div>
+                    <div className="text-xs text-slate-400 mt-0.5">Income minus amount paid out</div>
+                  </div>
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                <KpiCard
-                  label="Monthly Salary Bill"
-                  value={rupees(summary.salary.total)}
-                  subtext={`${summary.salary.paidCount} of ${summary.salary.totalCount} staff paid`}
-                  icon={<Wallet size={16} />} iconBg="bg-blue-lt" iconColor="text-blue"
-                />
-                <KpiCard
-                  label="Salaries Paid"
-                  value={rupees(summary.salary.paid)}
-                  icon={<TrendingUp size={16} />} iconBg="bg-green-lt" iconColor="text-green" valueColor="text-green"
-                />
-                <KpiCard
-                  label="Salaries Pending"
-                  value={rupees(summary.salary.pending)}
-                  icon={<TrendingDown size={16} />} iconBg="bg-red-lt" iconColor="text-red" valueColor="text-red"
-                />
-                <KpiCard
-                  label="Variable Bills Total"
-                  value={rupees(summary.variable.total)}
-                  subtext={`${summary.variable.count} bill(s) logged`}
-                  icon={<FileText size={16} />} iconBg="bg-amber-lt" iconColor="text-amber"
-                />
-                <KpiCard
-                  label="Variable Paid"
-                  value={rupees(summary.variable.paid)}
-                  icon={<TrendingUp size={16} />} iconBg="bg-green-lt" iconColor="text-green" valueColor="text-green"
-                />
-                <KpiCard
-                  label="Variable Pending"
-                  value={rupees(summary.variable.pending)}
-                  icon={<TrendingDown size={16} />} iconBg="bg-red-lt" iconColor="text-red" valueColor="text-red"
-                />
+              {/* Detailed Breakdown Panels */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
+                {/* Staff Salaries Card */}
+                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+                  <div className="flex items-center justify-between pb-2.5 border-b border-slate-100">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-md bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                        <Users size={15} />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-800">Staff Salaries Breakdown</h4>
+                        <p className="text-[11px] text-slate-400">{summary.salary.paidCount} of {summary.salary.totalCount} staff paid</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setActiveTab('salaries')}
+                      className="text-xs text-blue-600 hover:text-blue-700 font-semibold hover:underline"
+                    >
+                      Manage &rarr;
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 pt-3">
+                    <div className="bg-slate-50 rounded-lg p-2.5 border border-slate-100">
+                      <div className="text-[11px] font-medium text-slate-500">Total Bill</div>
+                      <div className="text-base sm:text-lg font-bold text-slate-900 mt-0.5">{rupees(summary.salary.total)}</div>
+                    </div>
+                    <div className="bg-emerald-50/70 rounded-lg p-2.5 border border-emerald-100">
+                      <div className="text-[11px] font-medium text-emerald-800">Paid</div>
+                      <div className="text-base sm:text-lg font-bold text-emerald-700 mt-0.5">{rupees(summary.salary.paid)}</div>
+                    </div>
+                    <div className="bg-red-50/70 rounded-lg p-2.5 border border-red-100">
+                      <div className="text-[11px] font-medium text-red-800">Pending</div>
+                      <div className="text-base sm:text-lg font-bold text-red-700 mt-0.5">{rupees(summary.salary.pending)}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Variable Bills Card */}
+                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+                  <div className="flex items-center justify-between pb-2.5 border-b border-slate-100">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-md bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
+                        <FileText size={15} />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-800">Variable Bills Breakdown</h4>
+                        <p className="text-[11px] text-slate-400">{summary.variable.count} bill(s) logged</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setActiveTab('variable')}
+                      className="text-xs text-blue-600 hover:text-blue-700 font-semibold hover:underline"
+                    >
+                      Manage &rarr;
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 pt-3">
+                    <div className="bg-slate-50 rounded-lg p-2.5 border border-slate-100">
+                      <div className="text-[11px] font-medium text-slate-500">Total Logged</div>
+                      <div className="text-base sm:text-lg font-bold text-slate-900 mt-0.5">{rupees(summary.variable.total)}</div>
+                    </div>
+                    <div className="bg-emerald-50/70 rounded-lg p-2.5 border border-emerald-100">
+                      <div className="text-[11px] font-medium text-emerald-800">Paid</div>
+                      <div className="text-base sm:text-lg font-bold text-emerald-700 mt-0.5">{rupees(summary.variable.paid)}</div>
+                    </div>
+                    <div className="bg-red-50/70 rounded-lg p-2.5 border border-red-100">
+                      <div className="text-[11px] font-medium text-red-800">Pending</div>
+                      <div className="text-base sm:text-lg font-bold text-red-700 mt-0.5">{rupees(summary.variable.pending)}</div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
+              {/* Monthly Trend Chart */}
               {trends.length > 0 && (
-                <div className="bg-white border border-slate-200 rounded-lg shadow-card p-5">
-                  <div className="flex items-center gap-2 mb-3">
-                    <BarChart3 size={18} className="text-blue" />
-                    <span className="text-md font-bold text-slate-900">Monthly Payout Trend (Last 6 Months)</span>
+                <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-4 sm:p-5">
+                  <div className="flex items-center justify-between gap-2 mb-4 pb-2 border-b border-slate-100">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-md bg-blue-50 text-blue-600 flex items-center justify-center">
+                        <BarChart3 size={15} />
+                      </div>
+                      <div>
+                        <span className="text-sm font-bold text-slate-900">Monthly Payout & Cash Flow Trend</span>
+                        <span className="text-xs text-slate-400 ml-2">(Last 6 Months)</span>
+                      </div>
+                    </div>
                   </div>
                   <TrendChart data={trends} />
                 </div>

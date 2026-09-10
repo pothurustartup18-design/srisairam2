@@ -152,6 +152,7 @@ const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({ user, onLogout }) =
 
   // S3 / Database Sizing Statistics
   const [stats, setStats] = useState<StorageStats | null>(null);
+  const [loadingStats, setLoadingStats] = useState(false);
   const [disableEventS3Storage, setDisableEventS3Storage] = useState(false);
 
   // Purge Event Media & Double Check State
@@ -257,6 +258,7 @@ const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({ user, onLogout }) =
   };
 
   const fetchStats = async () => {
+    setLoadingStats(true);
     try {
       const token = localStorage.getItem('schoolhub_access_token');
       const headers: HeadersInit = {};
@@ -271,6 +273,8 @@ const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({ user, onLogout }) =
       }
     } catch (err) {
       console.error('Failed to fetch storage stats:', err);
+    } finally {
+      setLoadingStats(false);
     }
   };
 
@@ -386,10 +390,7 @@ const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({ user, onLogout }) =
         headers: {
           'Content-Type': 'application/json',
           ...(token && { 'Authorization': `Bearer ${token}` })
-        },
-        // The endpoint refuses to wipe the database without this explicit
-        // acknowledgement (and refuses outright when NODE_ENV=production).
-        body: JSON.stringify({ confirm: 'DELETE ALL DATA' })
+        }
       });
       const data = await response.json();
       if (data.success) {

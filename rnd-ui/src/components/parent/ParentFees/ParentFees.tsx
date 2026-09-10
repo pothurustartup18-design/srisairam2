@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   CreditCard,
   CheckCircle2,
@@ -12,11 +12,13 @@ import {
   FileText,
   Bus,
   BookOpen,
+  Loader2,
 } from 'lucide-react';
 import type { StudentData } from '../../../types';
-import { formatClassName } from '../../../constants';
+import { API_BASE, formatClassName } from '../../../constants';
 import { cn } from '../../../lib/utils';
-import { EmptyState, Button } from '../../ui';
+import { EmptyState } from '../../ui';
+import { downloadReceiptFile } from '../../../utils/feeReceiptPdf';
 
 interface ParentFeesProps {
   ward: StudentData | undefined;
@@ -24,9 +26,21 @@ interface ParentFeesProps {
 }
 
 const ParentFees: React.FC<ParentFeesProps> = ({ ward, showToast }) => {
+  const [downloadingNo, setDownloadingNo] = useState<string | null>(null);
+  const [schoolProfile, setSchoolProfile] = useState<any>(null);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/school-profile`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.data) setSchoolProfile(data.data);
+      })
+      .catch((err) => console.error('Failed to load school profile:', err));
+  }, []);
+
   if (!ward) {
     return (
-      <div className="bg-white border border-slate-200 rounded-xl p-8 text-center">
+      <div className="bg-white border border-slate-200 rounded-xl p-8 text-center shadow-card">
         <EmptyState title="No student record linked to view fee details." />
       </div>
     );
@@ -42,25 +56,55 @@ const ParentFees: React.FC<ParentFeesProps> = ({ ward, showToast }) => {
   const isFullyPaid = feePending <= 0;
 
   const progressColor =
-    paidPct === 100 ? 'bg-emerald-500' : paidPct >= 70 ? 'bg-blue-500' : paidPct >= 40 ? 'bg-amber-500' : 'bg-rose-500';
+    paidPct === 100 ? 'bg-emerald-500' : paidPct >= 70 ? 'bg-blue-600' : paidPct >= 40 ? 'bg-amber-500' : 'bg-rose-500';
 
   const installments = ward.installments || [];
   const payments = ward.payments || [];
 
-  const handleDownloadReceipt = (receiptNo: string) => {
-    // Open receipt in public / verified endpoint or inform parent
-    window.open(`/api/receipts/download/${encodeURIComponent(receiptNo)}`, '_blank');
-    showToast(`Opening receipt #${receiptNo}…`);
+  const handleDownloadReceipt = async (p: any) => {
+    if (!ward) return;
+    setDownloadingNo(p.receiptNo);
+    try {
+      await downloadReceiptFile(
+        {
+          receiptNo: p.receiptNo,
+          amount: p.amount,
+          date: p.date,
+          paymentMode: p.paymentMode,
+          paymentType: (p as any).paymentType || 'school',
+          studentName: ward.name,
+          admissionNo: ward.admissionNo,
+          class: ward.class,
+          section: ward.section,
+          whatsappNo: ward.whatsappNo,
+        },
+        ward,
+        schoolProfile
+      );
+      showToast(`Receipt #${p.receiptNo} downloaded successfully.`, 'success');
+    } catch (err) {
+      console.error('Failed to generate receipt:', err);
+      showToast('Error generating receipt PDF.', 'error');
+    } finally {
+      setDownloadingNo(null);
+    }
   };
 
   return (
-    <div className="flex flex-col gap-4 font-sans text-slate-900">
-      {/* ─── Page Header ─── */}
-      <div>
-        <h1 className="text-xl font-extrabold text-slate-900 tracking-tight">Fee Breakdown & History</h1>
-        <p className="text-xs text-slate-500 mt-0.5">
-          Academic fees, installment schedules, and confirmed payment receipts for {ward.name} ({formatClassName(ward.class, ward.section)}).
-        </p>
+    <div className="flex flex-col gap-5 font-sans text-slate-900">
+      {/* ─── Page Header (Matches Admin Style) ─── */}
+      <div className="flex items-start justify-between gap-4 flex-wrap bg-white border border-slate-200 rounded-xl px-6 py-5 shadow-card">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900 m-0">Fee Breakdown &amp; Payment History</h2>
+          <p className="text-sm text-slate-500 mt-1">
+            Academic fees, installment schedules, and official confirmed receipts for {ward.name} ({formatClassName(ward.class, ward.section)}).
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={cn('inline-flex items-center gap-1.5 text-xs font-bold rounded-lg px-3 py-1.5 border', isFullyPaid ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-800 border-amber-200')}>
+            <CreditCard size={14} /> {isFullyPaid ? 'Dues Cleared' : `Pending: ₹${feePending.toLocaleString()}`}
+          </span>
+        </div>
       </div>
 
       {/* ─── Top Overview Card ─── */}
@@ -227,11 +271,17 @@ const ParentFees: React.FC<ParentFeesProps> = ({ ward, showToast }) => {
                     <span className="text-sm font-extrabold text-emerald-700">₹{p.amount.toLocaleString()}</span>
                     <button
                       type="button"
-                      onClick={() => handleDownloadReceipt(p.receiptNo)}
-                      title="Download receipt"
-                      className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
+                      onClick={() => handleDownloadReceipt(p)}
+                      disabled={downloadingNo === p.receiptNo}
+                      title="Download receipt PDF"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 bg-white hover:text-blue-600 hover:bg-slate-50 hover:border-slate-300 transition-colors cursor-pointer text-xs font-bold disabled:opacity-50 shadow-2xs"
                     >
-                      <Download size={13} />
+                      {downloadingNo === p.receiptNo ? (
+                        <Loader2 size={13} className="animate-spin text-blue-600" />
+                      ) : (
+                        <Download size={13} />
+                      )}
+                      <span>Download PDF</span>
                     </button>
                   </div>
                 </div>

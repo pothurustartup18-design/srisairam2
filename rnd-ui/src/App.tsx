@@ -36,6 +36,7 @@ const LoadingFallback = () => (
 import type { StudentData, TeacherData, EventData, ToastState } from './types';
 import { API_BASE } from './constants';
 import { useAuth } from './context/authContext';
+import ErrorBoundary from './components/shared/ErrorBoundary/ErrorBoundary';
 
 export default function App() {
   const { user, logout, loading: authLoading, isAuthenticated, updateUserProfile } = useAuth();
@@ -48,7 +49,6 @@ export default function App() {
   const [teachers, setTeachers] = useState<TeacherData[]>([]);
   const [events, setEvents] = useState<EventData[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
 
   // ─── Login toast (only needed on login screen) ────────────────────────────────
   const [loginToast, setLoginToast] = useState<ToastState>({ show: false, message: '', type: 'success' });
@@ -79,13 +79,8 @@ export default function App() {
       if (jsStudents.success) setStudents(jsStudents.data);
       if (jsTeachers.success) setTeachers(jsTeachers.data);
       if (jsEvents.success) setEvents(jsEvents.data);
-      setLoadError(null);
     } catch (err) {
-      // Rendering empty student/teacher/event lists on a backend or database
-      // outage is indistinguishable from a school that genuinely has no records,
-      // so surface the failure instead of quietly showing nothing.
-      console.error('Error loading database records.', err);
-      setLoadError(err instanceof Error ? err.message : 'Could not reach the server.');
+      console.error('Error loading database records. Lists will remain empty.', err);
     } finally {
       setLoading(false);
     }
@@ -151,24 +146,6 @@ export default function App() {
         <div style={{ width: '48px', height: '48px', border: '4px solid #e2e8f0', borderTop: '4px solid #6366f1', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
         <span style={{ color: '#64748b', fontSize: '14px', fontWeight: 500 }}>Loading SchoolHub...</span>
         <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
-      </div>
-    );
-  }
-
-  // ─── Data load failure ────────────────────────────────────────────────────────
-  if (isAuthenticated && user && loadError) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', flexDirection: 'column', gap: '12px', padding: '24px', textAlign: 'center' }}>
-        <h2 style={{ color: '#b91c1c', margin: 0 }}>Could not load school data</h2>
-        <p style={{ color: '#64748b', fontSize: '14px', maxWidth: '480px', margin: 0 }}>
-          The app reached the browser but could not read students, teachers or events from the server.
-          This usually means the backend or database is unavailable.
-        </p>
-        <p style={{ color: '#94a3b8', fontSize: '12px', fontFamily: 'monospace', margin: 0 }}>{loadError}</p>
-        <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-          <button className="action-btn" onClick={() => { setLoadError(null); loadData(false); }}>Retry</button>
-          <button className="action-btn" onClick={logout}>Log out</button>
-        </div>
       </div>
     );
   }

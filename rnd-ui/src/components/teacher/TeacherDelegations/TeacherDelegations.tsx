@@ -4,7 +4,7 @@ import type { TeacherData } from '../../../types';
 import { cn } from '../../../lib/utils';
 import { Button, PageHeader, Badge, DataTable, Th, Td, Tr, EmptyState, LoadingSpinner, Modal, filterControlClass, MobileRowCard, MobileCardList } from '../../ui';
 
-export interface DelegationRecord {
+interface DelegationRecord {
   _id: string;
   feature: string;
   isActive: boolean;

@@ -7,7 +7,7 @@ import {
 import type { StudentData } from '../../../types';
 import { API_BASE, formatClassName } from '../../../constants';
 import { getAccessToken } from '../../../services/api';
-import { cn } from '../../../lib/utils';
+import { cn, getLocalToday, getLocalMonth } from '../../../lib/utils';
 import { getAvatarColors, getInitials } from '../../../utils/avatar';
 import {
   Button, KpiCard, PageHeader, Badge, DataTable, Th, Td, Tr,
@@ -71,7 +71,7 @@ const TeacherAttendance: React.FC<TeacherAttendanceProps> = ({
   const [viewMode, setViewMode] = useState<'mark' | 'view' | 'reports'>('mark');
 
   // ─── Reports state ────────────────────────────────────────────────────────
-  const [reportMonth, setReportMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [reportMonth, setReportMonth] = useState(getLocalMonth());
   const [monthlyReport, setMonthlyReport] = useState<MonthlyReportRow[]>([]);
   const [loadingReport, setLoadingReport] = useState(false);
   const [downloadingCsv, setDownloadingCsv] = useState(false);
@@ -183,7 +183,7 @@ const TeacherAttendance: React.FC<TeacherAttendanceProps> = ({
     }
   };
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getLocalToday();
   const isPastDate = attendanceDate < todayStr;
 
   // Compute stats

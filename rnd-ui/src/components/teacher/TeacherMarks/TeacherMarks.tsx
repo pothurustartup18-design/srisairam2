@@ -10,6 +10,7 @@ import { API_BASE, formatClassName } from '../../../constants';
 import { getAccessToken } from '../../../services/api';
 import { cn } from '../../../lib/utils';
 import { Button, Badge, PageHeader, DataTable, Th, Td, Tr, EmptyState, Modal, Drawer, MobileRowCard, MobileCardList } from '../../ui';
+import { useSchool } from '../../../context/schoolContext';
 
 type MarksStep = 'list' | 'create' | 'entry';
 
@@ -28,12 +29,11 @@ interface TeacherMarksProps {
   onSubjectsChange: (subjects: ExamSubject[]) => void;
   onStudentGradeChange: (studentId: string, subject: string, value: number | '') => void;
   onStudentRemarkChange: (studentId: string, value: string) => void;
-  onLoadExamDetails: (examId: string) => Promise<void> | void;
+  onLoadExamDetails: (examId: string) => void;
   onCloseExamDetails: () => void;
   onSubmitMarks: (e: React.FormEvent) => void;
   isSubmittingMarks?: boolean;
   onSaveRemarks?: (exam: ExamData) => void;
-  onAutoSave?: () => Promise<boolean>;
   onEnterMarks?: (exam: ExamData) => void;
   showToast: (msg: string, type?: 'success' | 'error') => void;
   assignedClasses: string[];
@@ -184,7 +184,6 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
   onSubmitMarks,
   isSubmittingMarks = false,
   onSaveRemarks,
-  onAutoSave,
   onEnterMarks,
   showToast,
   assignedClasses,
@@ -192,6 +191,7 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
   onSubmitTemplate,
   isLocked = false,
 }) => {
+  const { schoolProfile } = useSchool();
   const [validationErrors, setValidationErrors] = useState<Record<string, Record<string, boolean>>>({});
   // Edit confirmation dialog state
   const [showEditConfirm, setShowEditConfirm] = useState(false);
@@ -206,6 +206,7 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
   const [dragSubjectIndex, setDragSubjectIndex] = useState<number | null>(null);
 
   const [generatingStudentId, setGeneratingStudentId] = useState<string | null>(null);
+  const [downloadingSingleStudentId, setDownloadingSingleStudentId] = useState<string | null>(null);
   const [sendingWhatsappId, setSendingWhatsappId] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewStudentName, setPreviewStudentName] = useState<string>('');
@@ -221,38 +222,44 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
   const handleSendWhatsAppAlert = async (student: StudentData, existingPdfUrl?: string) => {
     setSendingWhatsappId(student.id);
     const studentName = student.name || `${student.firstName || ''} ${student.lastName || ''}`.trim();
+    const schoolName = schoolProfile?.schoolInfo?.schoolName || 'SchoolHub';
+    const examNameVal = selectedExam?.examName || 'the examination';
 
     try {
-      if (!selectedExam) throw new Error('No exam selected');
-
-      // Ensure the report-card PDF exists and is stored against this student
-      // (POST /marks/upload-pdf persists studentMarks.pdfUrl) before dispatching.
-      if (!existingPdfUrl) {
+      // Auto-generate + upload PDF if not yet available
+      let pdfUrl = existingPdfUrl;
+      if (!pdfUrl) {
+        if (!selectedExam) throw new Error('No exam selected');
         showToast('Generating report card before sending...', 'success');
-        await uploadSingleStudentReportPDF(selectedExam, student, studentRemarks, teacherName);
+        pdfUrl = await uploadSingleStudentReportPDF(selectedExam, student, studentRemarks, teacherName);
+        // Refresh exam details so the eye/download buttons light up
         if (onLoadExamDetails) onLoadExamDetails(selectedExam._id);
       }
+
+      const englishMessage = `📊 *Report Card Ready*\n\nDear Parent,\n\nThe report card for your ward *${studentName}* for *${examNameVal}* has been successfully generated. 🎓\n\n👤 *Student:* ${studentName}\n📝 *Examination:* ${examNameVal}\n\n📄 The report card is attached to this message.\n\nThank you. 🙏\n\n*— ${schoolName}*`;
+      const teluguMessage = `📊 *రిపోర్ట్ కార్డ్ సిద్ధంగా ఉంది*\n\nప్రియమైన తల్లిదండ్రులారా,\n\nమీ బిడ్డ *${studentName}* కి సంబంధించిన *${examNameVal === 'the examination' ? 'పరీక్ష' : examNameVal}* ప్రగతి పత్రం (Report Card) విజయవంతంగా రూపొందించబడింది. 🎓\n\n👤 *విద్యార్థి:* ${studentName}\n📝 *పరీక్ష:* ${examNameVal === 'the examination' ? 'పరీక్ష' : examNameVal}\n\n📄 ఈ సందేశానికి ప్రగతి పత్రం జతచేయబడింది.\n\nధన్యవాదాలు. 🙏\n\n*— ${schoolName}*`;
+
+      const messageText = `${englishMessage}\n\n${teluguMessage}\n\n${pdfUrl}`;
 
       const token = getAccessToken();
       const headers: HeadersInit = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      // Proactive delivery goes out as the approved `report_card_notice` Meta
-      // template (DOCUMENT header = the report-card PDF), via the
-      // queue → worker → whatsapp.service pipeline.
-      const res = await fetch(`${API_BASE}/marks/${selectedExam._id}/report-card/${student.id}/whatsapp`, {
+      const res = await fetch(`${API_BASE}/messages/student/${student.id}/whatsapp`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({}),
+        body: JSON.stringify({ text: messageText })
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        showToast(`Report card WhatsApp sent to ${studentName}'s parent!`, 'success');
+
+      const resData = await res.json();
+      if (res.ok && resData.success) {
+        showToast(`WhatsApp alert sent to parent of ${studentName}!`, 'success');
       } else {
-        throw new Error(data.message || 'Failed');
+        throw new Error(resData.message || 'Failed to send WhatsApp alert');
       }
     } catch (err: any) {
-      showToast(err.message || 'Failed.', 'error');
+      console.error(err);
+      showToast(err.message || 'Failed to dispatch WhatsApp alert.', 'error');
     } finally {
       setSendingWhatsappId(null);
     }
@@ -315,16 +322,6 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
     if (!selectedExam) return;
     setGeneratingStudentId(student.id);
     try {
-      if (onAutoSave) {
-        const saved = await onAutoSave();
-        if (!saved) {
-          showToast('Failed to auto-save grades/remarks.', 'error');
-          return;
-        }
-        if (onLoadExamDetails) {
-          await onLoadExamDetails(selectedExam._id);
-        }
-      }
       await uploadSingleStudentReportPDF(selectedExam, student, studentRemarks, teacherName);
       showToast(`Report card generated successfully for ${student.name}!`, 'success');
       if (onLoadExamDetails) {
@@ -348,16 +345,6 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
     if (students.length === 0) { showToast('No students found to generate report.', 'error'); return; }
     setDownloadingClassPdf(true);
     try {
-      if (onAutoSave) {
-        const saved = await onAutoSave();
-        if (!saved) {
-          showToast('Failed to auto-save grades/remarks before bulk download.', 'error');
-          return;
-        }
-        if (onLoadExamDetails) {
-          await onLoadExamDetails(selectedExam._id);
-        }
-      }
       await generateReportCardPDF(selectedExam, students, studentRemarks, teacherName);
       showToast('Report Card PDF downloaded successfully!');
     } catch (err) {
@@ -370,22 +357,15 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
 
   const handleDownloadStudentPDF = async (student: StudentData) => {
     if (!selectedExam) return;
+    setDownloadingSingleStudentId(student.id);
     try {
-      if (onAutoSave) {
-        const saved = await onAutoSave();
-        if (!saved) {
-          showToast('Failed to auto-save grades/remarks.', 'error');
-          return;
-        }
-        if (onLoadExamDetails) {
-          await onLoadExamDetails(selectedExam._id);
-        }
-      }
       await generateSingleStudentReportPDF(selectedExam, student, studentRemarks, teacherName);
-      showToast(`Report card downloaded for ${student.name}.`);
+      showToast(`Report card downloaded for ${student.name}.`, 'success');
     } catch (err) {
       console.error('PDF generation error:', err);
       showToast('Failed to generate PDF. Please try again.', 'error');
+    } finally {
+      setDownloadingSingleStudentId(null);
     }
   };
 
@@ -716,10 +696,11 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
                                   title={isLocked ? 'Mark entry is locked for this class' : ''}
                                   onClick={() => handleGenerateStudentPDF(student)}
                                 >
-                                  {generatingStudentId === student.id ? <Loader2 size={13} className="animate-spin" /> : 'Generate'}
+                                  {generatingStudentId === student.id ? <Loader2 size={13} className="animate-spin mr-1" /> : null}
+                                  {generatingStudentId === student.id ? 'Generating...' : 'Generate'}
                                 </Button>
-                                <button type="button" className="w-8 h-8 flex items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors" title={`Download report for ${student.name}`} onClick={() => handleDownloadStudentPDF(student)}>
-                                  <Download size={14} />
+                                <button type="button" className="w-8 h-8 flex items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors" title={`Download report for ${student.name}`} disabled={downloadingSingleStudentId === student.id} onClick={() => handleDownloadStudentPDF(student)}>
+                                  {downloadingSingleStudentId === student.id ? <Loader2 size={14} className="animate-spin text-blue-600" /> : <Download size={14} />}
                                 </button>
                                 {smRecord?.pdfUrl && (
                                   <button type="button" className="w-8 h-8 flex items-center justify-center rounded-md border border-green-200 text-green hover:bg-green-lt transition-colors" title={`View report for ${student.name}`} onClick={() => handlePreviewPDF(smRecord.pdfUrl!, student.name)}>
@@ -775,10 +756,12 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
                                   disabled={generatingStudentId === student.id || isLocked}
                                   onClick={() => handleGenerateStudentPDF(student)}
                                 >
-                                  {generatingStudentId === student.id ? <Loader2 size={13} className="animate-spin" /> : 'Generate'}
+                                  {generatingStudentId === student.id ? <Loader2 size={13} className="animate-spin mr-1" /> : null}
+                                  {generatingStudentId === student.id ? 'Generating...' : 'Generate'}
                                 </Button>
-                                <Button size="sm" variant="secondary" onClick={() => handleDownloadStudentPDF(student)}>
-                                  <Download size={13} /> Download
+                                <Button size="sm" variant="secondary" disabled={downloadingSingleStudentId === student.id} onClick={() => handleDownloadStudentPDF(student)}>
+                                  {downloadingSingleStudentId === student.id ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                                  Download
                                 </Button>
                                 {smRecord?.pdfUrl && (
                                   <Button size="sm" variant="secondary" onClick={() => handlePreviewPDF(smRecord.pdfUrl!, student.name)}>

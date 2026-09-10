@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
-import { Megaphone, Calendar, Bell } from 'lucide-react';
+import {
+  Image as ImageIcon, Film, Music, FileText, Megaphone, Calendar, Bell
+} from 'lucide-react';
 import type { EventData } from '../../../types';
 import { cn } from '../../../lib/utils';
 import { EmptyState } from '../../ui';
@@ -11,8 +13,8 @@ interface ParentNoticesProps {
 const getMediaType = (url: string): 'image' | 'video' | 'audio' | 'document' => {
   const l = url.toLowerCase();
   if (/\.(png|jpg|jpeg|webp|gif)/.test(l)) return 'image';
-  if (/\.(mp3|m4a|ogg|wav|aac)/.test(l))  return 'audio';
-  if (/\.(mp4|mov|avi|3gp)/.test(l))       return 'video';
+  if (/\.(mp3|m4a|ogg|wav|aac)/.test(l)) return 'audio';
+  if (/\.(mp4|mov|avi|3gp)/.test(l)) return 'video';
   return 'document';
 };
 
@@ -21,44 +23,52 @@ const ParentNotices: React.FC<ParentNoticesProps> = ({ events }) => {
 
   const parentVisibleEvents = events.filter(e => e.sendAlertsTo !== 'teachers');
   const noticesList = parentVisibleEvents.filter(e => e.type ? e.type === 'notice' : (!e.media || e.media.length === 0));
-  const eventsList  = parentVisibleEvents.filter(e => e.type ? e.type === 'event' : (e.media && e.media.length > 0));
+  const eventsList = parentVisibleEvents.filter(e => e.type ? e.type === 'event' : (e.media && e.media.length > 0));
 
   const tabs = [
     { key: 'notices' as const, label: 'General Notices', count: noticesList.length, Icon: Megaphone },
-    { key: 'events'  as const, label: 'Scheduled Events', count: eventsList.length, Icon: Calendar },
+    { key: 'events' as const, label: 'Scheduled Events', count: eventsList.length, Icon: Calendar },
   ];
 
   return (
-    <div className="flex flex-col gap-4 font-sans text-slate-900">
-      <div>
-        <h1 className="text-xl font-extrabold text-slate-900 tracking-tight">School Notice Board</h1>
-        <p className="text-xs text-slate-500 mt-0.5">Announcements and events published by the school.</p>
-      </div>
-
-      {/* Tab switcher */}
-      <div className="flex bg-slate-100 rounded-lg p-1 gap-1 max-w-xs self-start w-full">
-        {tabs.map(({ key, label, count, Icon }) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setBoardTab(key)}
-            className={cn(
-              'flex-1 flex items-center justify-center gap-1 h-8 rounded-md text-xs font-semibold transition-all',
-              boardTab === key
-                ? 'bg-white text-slate-900 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700'
-            )}
-          >
-            <Icon size={13} />
-            {label}
-            <span className={cn(
-              'text-[10px] font-bold rounded-full px-1.5 py-0.5 min-w-[18px] text-center',
-              boardTab === key ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-200 text-slate-500'
-            )}>
-              {count}
-            </span>
-          </button>
-        ))}
+    <div className="flex flex-col gap-5 font-sans text-slate-900">
+      {/* ─── PAGE HEADER (Matches Admin Style) ─── */}
+      <div className="flex items-start justify-between gap-4 flex-wrap bg-white border border-slate-200 rounded-xl px-6 py-5 shadow-card">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900 m-0">School Circulars &amp; Events</h2>
+          <p className="text-sm text-slate-500 mt-1">
+            Official announcements, examination timetables, holiday circulars, and scheduled campus events.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {/* Tab switcher */}
+          <div className="flex bg-slate-100 rounded-lg p-1 gap-1">
+            {tabs.map(({ key, label, count, Icon }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setBoardTab(key)}
+                className={cn(
+                  'flex items-center justify-center gap-1.5 h-8 px-3 rounded-md text-xs font-bold transition-all cursor-pointer border-0',
+                  boardTab === key
+                    ? 'bg-white text-slate-900 shadow-2xs'
+                    : 'text-slate-500 hover:text-slate-900 bg-transparent'
+                )}
+              >
+                <Icon size={13} />
+                {label}
+                <span
+                  className={cn(
+                    'text-[10px] font-bold rounded-full px-1.5 py-0.5 text-center',
+                    boardTab === key ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600'
+                  )}
+                >
+                  {count}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Notices board */}
@@ -152,4 +162,5 @@ const ParentNotices: React.FC<ParentNoticesProps> = ({ events }) => {
 };
 
 export default ParentNotices;
+
 

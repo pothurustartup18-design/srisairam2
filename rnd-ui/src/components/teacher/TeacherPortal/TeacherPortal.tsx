@@ -5,6 +5,7 @@ import Toast from '../../shared/Toast/Toast';
 import { TeacherSidebar } from '../../shared/Sidebars/Sidebars';
 import { Button, KpiCard, Modal } from '../../ui';
 import { GraduationCap, Users as UsersIcon } from 'lucide-react';
+import { getLocalToday } from '../../../lib/utils';
 
 const TeacherStudents = lazy(() => import('../TeacherStudents/TeacherStudents'));
 const TeacherAttendance = lazy(() => import('../TeacherAttendance/TeacherAttendance'));
@@ -29,7 +30,6 @@ import type {
   ExamSubject,
   ToastState,
 } from '../../../types';
-import type { DelegationRecord } from '../TeacherDelegations/TeacherDelegations';
 import { API_BASE, formatClassName } from '../../../constants';
 import { useAuth } from '../../../context/authContext';
 
@@ -137,7 +137,7 @@ const TeacherPortal: React.FC<TeacherPortalProps> = ({ user, students, teachers,
   const [sendingMessage, setSendingMessage] = useState(false);
 
   // ─── Permission Delegation States ───────────────────────────────────────────
-  const [delegations, setDelegations] = useState<{ sent: DelegationRecord[]; received: DelegationRecord[] }>({ sent: [], received: [] });
+  const [delegations, setDelegations] = useState<{ sent: any[]; received: any[] }>({ sent: [], received: [] });
   const [delegationsLoading, setDelegationsLoading] = useState(false);
 
   const loadDelegations = async () => {
@@ -311,9 +311,10 @@ const TeacherPortal: React.FC<TeacherPortalProps> = ({ user, students, teachers,
   });
 
   // ─── Attendance State ────────────────────────────────────────────────────────
-  const [attendanceDate, setAttendanceDate] = useState(new Date().toISOString().split('T')[0]);
+  const [attendanceDate, setAttendanceDate] = useState(getLocalToday());
   const [attendanceMap, setAttendanceMap] = useState<Record<string, 'present' | 'absent'>>({});
   const [attendanceStats, setAttendanceStats] = useState<Record<string, number>>({});
+  const [showAbsentAlertConfirm, setShowAbsentAlertConfirm] = useState(false);
   const [isAttendanceMarkedForDate, setIsAttendanceMarkedForDate] = useState(false);
   const [attendanceMode, setAttendanceMode] = useState<'full' | 'half-day'>('full');
   const [morningMap, setMorningMap] = useState<Record<string, 'present' | 'absent'>>({});
@@ -677,65 +678,6 @@ const TeacherPortal: React.FC<TeacherPortalProps> = ({ user, students, teachers,
     }
   };
 
-  const handleAutoSave = async (): Promise<boolean> => {
-    if (!selectedExam || !activeTeacherId) return false;
-
-    const subjects = examSubjects.map((s) => ({ name: s.name.trim(), totalMarks: Number(s.totalMarks) }));
-    const studentMarksPayload = myStudents.map((student) => {
-      const grades = studentGrades[student.id] || {};
-      return {
-        studentId: student.id,
-        marks: subjects.map((sub) => ({ subject: sub.name, obtainedMarks: grades[sub.name] !== undefined ? Number(grades[sub.name]) : 0 })),
-        remarks: studentRemarks[student.id] || ''
-      };
-    });
-
-    // Client-side bounds validation
-    for (const sm of studentMarksPayload) {
-      for (const m of sm.marks) {
-        const total = subjects.find((sub) => sub.name === m.subject)?.totalMarks || 100;
-        if (m.obtainedMarks < 0 || m.obtainedMarks > total) {
-          const sName = students.find((s) => s.id === sm.studentId)?.name || 'Student';
-          showToast(`Error: ${sName}'s marks in ${m.subject} (${m.obtainedMarks}) must be 0–${total}.`, 'error');
-          return false;
-        }
-      }
-    }
-
-    try {
-      if (isEditMode && editingExamId) {
-        // Edit mode: PATCH each student
-        for (const sm of studentMarksPayload) {
-          const res = await fetch(`${API_BASE}/marks/${editingExamId}/student`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ studentId: sm.studentId, marks: sm.marks, remarks: sm.remarks }),
-          });
-          const data = await res.json();
-          if (!data.success) return false;
-        }
-      } else {
-        // New entry / draft: POST full sheet
-        const res = await fetch(`${API_BASE}/marks`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            examName,
-            classTeacherId: activeTeacherId,
-            class: selectedClass || 'N/A',
-            subjects,
-            studentMarks: studentMarksPayload
-          }),
-        });
-        const data = await res.json();
-        if (!data.success) return false;
-      }
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
   const handleCreateTemplate = async (examName: string, examType: 'final' | 'middle' | 'regular', subjects: ExamSubject[], targetRooms: string[]) => {
     if (!activeTeacherId) return;
     let successCount = 0;
@@ -844,6 +786,7 @@ const TeacherPortal: React.FC<TeacherPortalProps> = ({ user, students, teachers,
   const handleAttendanceSubmit = (e: React.FormEvent) => { e.preventDefault(); confirmAttendanceSubmit(true); };
 
   const confirmAttendanceSubmit = async (sendAlerts: boolean) => {
+    setShowAbsentAlertConfirm(false);
     if (!activeTeacherId) return;
     const records = Object.keys(attendanceMap).map((sId) => {
       const morningStatus = morningMap[sId] || 'present';
@@ -955,11 +898,6 @@ const TeacherPortal: React.FC<TeacherPortalProps> = ({ user, students, teachers,
             )}
           </div>
           <div className="header-right">
-            <div className="header-actions" style={{ display: 'flex', gap: '8px', marginRight: '16px' }}>
-              <button className="action-icon-btn" onClick={handleToggleTheme} title={theme === 'dark' ? "Switch to Light Theme" : "Switch to Dark Theme"}>
-                {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-              </button>
-            </div>
             <div className="user-profile">
               <div
                 className="user-avatar"
@@ -1054,7 +992,6 @@ const TeacherPortal: React.FC<TeacherPortalProps> = ({ user, students, teachers,
                   onSubmitMarks={handleMarksSubmit}
                   isSubmittingMarks={isSubmittingMarks}
                   onSaveRemarks={handleSaveRemarks}
-                  onAutoSave={handleAutoSave}
                   onEnterMarks={loadExamForEntry}
                   showToast={showToast}
                   assignedClasses={assignedClasses}

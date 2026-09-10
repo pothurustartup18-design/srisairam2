@@ -4,7 +4,7 @@ import { Database, HardDrive, RefreshCw, Server, AlertTriangle, ShieldCheck, Che
 import { API_BASE } from '../../../constants';
 import { getAccessToken } from '../../../services/api';
 import { usePhoneOtp } from '../../../hooks/usePhoneOtp';
-import { cn } from '../../../lib/utils';
+import { cn, getLocalToday } from '../../../lib/utils';
 import { Button, Badge, Drawer, Modal } from '../../ui';
 import SchoolProfileSettings from './SchoolProfileSettings';
 import AdminPrincipalSignature from './AdminPrincipalSignature';
@@ -68,7 +68,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
   const [attendanceMode, setAttendanceMode] = useState<'full' | 'half-day'>('full');
 
   const [viewMode, setViewMode] = useState<'menu' | 'sizing' | 'sync' | 'backups' | 'admin' | 'permissions' | 'feeStructures' | 'collections' | 'auditLogs' | 'schoolProfile' | 'principalSignature'>(initialViewMode);
-  
+
   // Create Admin Form State
   const [newAdmin, setNewAdmin] = useState({
     username: '',
@@ -93,7 +93,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
   const [editingPermissionsUser, setEditingPermissionsUser] = useState<any | null>(null);
   const [editingPermissionsList, setEditingPermissionsList] = useState<string[]>([]);
   const [savingPermissions, setSavingPermissions] = useState(false);
-  
+
   // Custom Employee edit/delete states
   const [editingEmployeeUser, setEditingEmployeeUser] = useState<any | null>(null);
   const [editingEmployeeForm, setEditingEmployeeForm] = useState({
@@ -123,6 +123,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
     phone: newAdmin.phone,
     showToast,
     verifiedNumberSnapshotAt: 'send',
+    exposeDevOtpCode: false,
     requireResOk: true,
     autoResetOnEmptyPhone: false,
   });
@@ -403,7 +404,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
   }, [viewMode]);
 
   // â”€â”€â”€ Daily Collections State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const [collectionsDate, setCollectionsDate] = useState(new Date().toISOString().split('T')[0]);
+  const [collectionsDate, setCollectionsDate] = useState(getLocalToday());
   const [collectionsData, setCollectionsData] = useState<any>(null);
   const [loadingCollections, setLoadingCollections] = useState(false);
 
@@ -542,11 +543,11 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
     option.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     option.description.toLowerCase().includes(searchQuery.toLowerCase())
   );
-  
-  
+
+
   const [downloading, setDownloading] = useState<'students' | 's3' | null>(null);
 
- 
+
   const [exams, setExams] = useState<ExamInfo[]>([]);
   const [selectedExam, setSelectedExam] = useState<string>('');
   const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([]);
@@ -563,12 +564,6 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
   const [selectedCsvFile, setSelectedCsvFile] = useState<File | null>(null);
   const [restoringDb, setRestoringDb] = useState(false);
   const csvInputRef = useRef<HTMLInputElement>(null);
-
-  // Restore S3 Media state
-  const [selectedZipFile, setSelectedZipFile] = useState<File | null>(null);
-  const [restoringS3, setRestoringS3] = useState(false);
-  const [s3RestoreLogs, setS3RestoreLogs] = useState<SyncLogItem[]>([]);
-  const zipInputRef = useRef<HTMLInputElement>(null);
 
   const fetchStats = async (isRefresh = false) => {
     try {
@@ -610,9 +605,9 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
       const resData = await res.json();
       if (res.ok && resData.success) {
         showToast(
-          newValue 
-            ? 'Event S3 uploads disabled to save storage.' 
-            : 'Event S3 uploads enabled.', 
+          newValue
+            ? 'Event S3 uploads disabled to save storage.'
+            : 'Event S3 uploads enabled.',
           'success'
         );
         fetchStats(false);
@@ -697,7 +692,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
   const handleDownloadBackup = async (type: 'students' | 's3') => {
     setDownloading(type);
     showToast(`Generating ${type === 'students' ? 'Excel/CSV' : 'ZIP'} backup package, please wait...`, 'success');
-    
+
     try {
       const token = getAccessToken();
       const headers: HeadersInit = {};
@@ -719,17 +714,17 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      
+
       const dateStr = new Date().toISOString().slice(0, 10);
-      a.download = type === 'students' 
-        ? `students_backup_${dateStr}.csv` 
+      a.download = type === 'students'
+        ? `students_backup_${dateStr}.csv`
         : `s3_backup_${dateStr}.zip`;
-        
+
       document.body.appendChild(a);
       a.click();
       a.remove();
       window.URL.revokeObjectURL(url);
-      
+
       showToast(`${type === 'students' ? 'Student database' : 'Cloud media files'} backup downloaded successfully.`, 'success');
     } catch (err: any) {
       console.error(err);
@@ -753,41 +748,25 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
       const reader = new FileReader();
       reader.onload = () => {
         const base64 = reader.result as string;
-        
+
+        // Parse filename for admission code
+        const regex = /adm[-_]?[0-9]+/i;
+        const match = file.name.match(regex);
+
         let studentName = undefined;
         let admissionNo = undefined;
         let status: 'matched' | 'unmatched' = 'unmatched';
 
-        // Parse filename for 24-character MongoDB Student ID
-        const objectIdRegex = /[0-9a-fA-F]{24}/;
-        const objectIdMatch = file.name.match(objectIdRegex);
-
-        if (objectIdMatch) {
-          const studentId = objectIdMatch[0];
-          const found = students.find(s => s._id === studentId || s.id === studentId);
+        if (match) {
+          const admKey = match[0].toLowerCase();
+          const found = students.find(s =>
+            s.admissionNo?.toLowerCase() === admKey ||
+            s.admissionNo?.toLowerCase().replace('-', '') === admKey.replace('-', '')
+          );
           if (found) {
             studentName = found.name;
             admissionNo = found.admissionNo;
             status = 'matched';
-          }
-        }
-
-        if (status === 'unmatched') {
-          // Parse filename for admission code
-          const regex = /adm[-_]?[0-9]+/i;
-          const match = file.name.match(regex);
-          
-          if (match) {
-            const admKey = match[0].toLowerCase();
-            const found = students.find(s => 
-              s.admissionNo?.toLowerCase() === admKey ||
-              s.admissionNo?.toLowerCase().replace('-', '') === admKey.replace('-', '')
-            );
-            if (found) {
-              studentName = found.name;
-              admissionNo = found.admissionNo;
-              status = 'matched';
-            }
           }
         }
 
@@ -973,63 +952,6 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
     reader.readAsDataURL(selectedCsvFile);
   };
 
-  const handleZipFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files && files[0]) {
-      setSelectedZipFile(files[0]);
-    }
-  };
-
-  const handleRestoreS3 = async () => {
-    if (!selectedZipFile) return;
-    setRestoringS3(true);
-    setS3RestoreLogs([]);
-    showToast('Reading and uploading backup ZIP archive, please wait...', 'success');
-
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        const base64 = reader.result as string;
-        const token = getAccessToken();
-        const headers: HeadersInit = {
-          'Content-Type': 'application/json'
-        };
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
-        }
-
-        const res = await fetch(`${API_BASE}/settings/restore-s3`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            file: {
-              filename: selectedZipFile.name,
-              base64
-            }
-          })
-        });
-
-        const resData = await res.json();
-        if (res.ok && resData.success) {
-          showToast(resData.message || 'S3 media backup restored successfully.', 'success');
-          if (resData.logs) {
-            setS3RestoreLogs(resData.logs);
-          }
-          setSelectedZipFile(null);
-          fetchStats(false); // Update S3 sizing state
-        } else {
-          throw new Error(resData.message || 'Failed to restore media storage.');
-        }
-      } catch (err: any) {
-        console.error(err);
-        showToast(err.message || 'Error occurred during media storage restoration.', 'error');
-      } finally {
-        setRestoringS3(false);
-      }
-    };
-    reader.readAsDataURL(selectedZipFile);
-  };
-
   const handleCreateAdminSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAdmin.firstName.trim() || !newAdmin.lastName.trim() || !newAdmin.phone.trim()) {
@@ -1188,7 +1110,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
 
   const handleToggleTeacherLogin = async (teacherId: string, currentStatus: string) => {
     const nextStatus = currentStatus === 'active' ? 'inactive' : 'active';
-    
+
     // Optimistic UI update
     setTeachersAccess(prev => prev.map(t => t._id === teacherId ? { ...t, status: nextStatus } : t));
 
@@ -1507,7 +1429,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
                   </div>
 
                   <div className="divider" />
-                  
+
                   <div className="permission-toggle-item" style={{ margin: 0, padding: '12px 16px', background: '#f8fafc', border: '1px solid #e2e8f0' }}>
                     <div className="permission-item-details">
                       <span className="permission-item-name" style={{ fontSize: '13.5px' }}>Save Storage: Disable Event S3 Uploads</span>
@@ -1516,9 +1438,9 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
                       </span>
                     </div>
                     <label className="toggle-switch">
-                      <input 
-                        type="checkbox" 
-                        checked={disableEventS3Storage} 
+                      <input
+                        type="checkbox"
+                        checked={disableEventS3Storage}
                         onChange={handleToggleEventS3}
                       />
                       <span className="toggle-slider"></span>
@@ -1526,10 +1448,10 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
                   </div>
 
                   <div className="divider" style={{ margin: '12px 0' }} />
-                  
-                  <button 
+
+                  <button
                     className="action-btn"
-                    style={{ 
+                    style={{
                       background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
                       border: 'none',
                       color: 'white',
@@ -1664,7 +1586,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
                       <div className="max-h-48 overflow-y-auto flex flex-col gap-1.5 p-3 bg-slate-900 dark:bg-black rounded-lg">
                         {syncLogs.map((log, idx) => (
                           <div key={idx} className="flex items-start gap-2">
-                            <span className={`text-xs font-bold flex-shrink-0 ${log.status === 'synced' ? 'text-emerald-400' : 'text-red-400'}`}>{log.status === 'synced' ? 'âœ“' : 'âœ—'}</span>
+                            <span className={`text-xs font-bold flex-shrink-0 ${log.status === 'synced' ? 'text-emerald-400' : 'text-red-400'}`}>{log.status === 'synced' ? '✓' : '✕'}</span>
                             <div className="text-[11px] text-slate-300 font-mono">
                               <span className="text-white font-semibold">{log.filename}</span>
                               <span className="text-slate-400">: {log.details} {log.studentName && `(${log.studentName})`}</span>
@@ -1733,11 +1655,10 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
                     Existing profiles matching the admission key will be updated, and missing profiles will be created.
                   </p>
                   <div
-                    className={`flex flex-col items-center justify-center gap-2 py-10 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${
-                      selectedCsvFile
+                    className={`flex flex-col items-center justify-center gap-2 py-10 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${selectedCsvFile
                         ? 'border-emerald-400 bg-emerald-50/30 dark:bg-emerald-950/20'
                         : 'border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 hover:border-emerald-400 hover:bg-emerald-50/20'
-                    }`}
+                      }`}
                     onClick={() => csvInputRef.current?.click()}
                   >
                     <Upload size={28} className={selectedCsvFile ? 'text-emerald-500' : 'text-slate-400 dark:text-slate-500'} />
@@ -1757,67 +1678,6 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
                         className="text-sm font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
                         onClick={() => setSelectedCsvFile(null)} disabled={restoringDb}
                       >Cancel</button>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Restore Media Storage ZIP Card */}
-              <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
-                <div className="flex items-center gap-3 px-5 py-3.5 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
-                  <div className="w-7 h-7 rounded-lg bg-amber-50 dark:bg-amber-950 flex items-center justify-center flex-shrink-0">
-                    <HardDrive size={14} className="text-amber-600 dark:text-amber-400" />
-                  </div>
-                  <div className="text-sm font-bold text-slate-800 dark:text-slate-100">Restore Media Storage (ZIP)</div>
-                </div>
-                <div className="p-5 flex flex-col gap-4">
-                  <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
-                    Upload an S3 media backup <code className="text-xs bg-slate-100 dark:bg-slate-700 px-1 py-0.5 rounded font-mono">.zip</code> file to restore stored files.
-                    All files will be uploaded back to S3 under their original folders, and report cards will be automatically synchronized with database records.
-                  </p>
-                  <div
-                    className={`flex flex-col items-center justify-center gap-2 py-10 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${
-                      selectedZipFile
-                        ? 'border-amber-400 bg-amber-50/30 dark:bg-amber-950/20'
-                        : 'border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 hover:border-amber-400 hover:bg-amber-50/20'
-                    }`}
-                    onClick={() => zipInputRef.current?.click()}
-                  >
-                    <Upload size={28} className={selectedZipFile ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'} />
-                    <span className="text-sm font-semibold text-slate-600 dark:text-slate-300">{selectedZipFile ? selectedZipFile.name : 'Click to browse or drop backup ZIP here'}</span>
-                    <span className="text-xs text-slate-400 dark:text-slate-500">Accepts only s3_backup_*.zip files</span>
-                    <input type="file" ref={zipInputRef} accept=".zip" onChange={handleZipFileChange} style={{ display: 'none' }} />
-                  </div>
-                  {selectedZipFile && (
-                    <div className="flex items-center gap-3">
-                      <button
-                        className="flex items-center gap-2 h-10 px-5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold transition-colors disabled:opacity-50"
-                        onClick={handleRestoreS3} disabled={restoringS3}
-                      >
-                        {restoringS3 ? <><RefreshCw size={14} className="animate-spin" /><span>Restoring...</span></> : <><CheckCircle2 size={14} /><span>Upload &amp; Restore Media</span></>}
-                      </button>
-                      <button
-                        className="text-sm font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
-                        onClick={() => setSelectedZipFile(null)} disabled={restoringS3}
-                      >Cancel</button>
-                    </div>
-                  )}
-
-                  {/* S3 Restore Sync logs */}
-                  {s3RestoreLogs.length > 0 && (
-                    <div className="flex flex-col gap-2 mt-2">
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Media Restore Logs</h4>
-                      <div className="max-h-48 overflow-y-auto flex flex-col gap-1.5 p-3 bg-slate-900 dark:bg-black rounded-lg">
-                        {s3RestoreLogs.map((log, idx) => (
-                          <div key={idx} className="flex items-start gap-2">
-                            <span className={`text-xs font-bold flex-shrink-0 ${log.status === 'synced' ? 'text-emerald-400' : 'text-red-400'}`}>{log.status === 'synced' ? '✓' : '✗'}</span>
-                            <div className="text-[11px] text-slate-300 font-mono">
-                              <span className="text-white font-semibold">{log.filename}</span>
-                              <span className="text-slate-400">: {log.details} {log.studentName && `(${log.studentName})`}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
                     </div>
                   )}
                 </div>
@@ -1964,7 +1824,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
                                 {emp.firstName} {emp.lastName}
                               </div>
                               <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                                {emp.phone} {emp.email && <span>Â· {emp.email}</span>}
+                                {emp.phone} {emp.email && <span>· {emp.email}</span>}
                               </div>
                               <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">
                                 ID: {emp.employeeId || 'NOT ASSIGNED'}
@@ -2063,7 +1923,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
                   {/* Basic Info */}
                   <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl overflow-hidden">
                     <div className="px-5 py-3 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 m-0">1 Â· Basic Information</h4>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 m-0">1 · Basic Information</h4>
                     </div>
                     <div className="p-5 flex flex-col gap-4">
                       <div className="grid grid-cols-2 gap-4">
@@ -2170,7 +2030,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
                   {/* Role */}
                   <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl overflow-hidden">
                     <div className="px-5 py-3 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 m-0">2 Â· Account Role</h4>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 m-0">2 · Account Role</h4>
                     </div>
                     <div className="p-5">
                       <select
@@ -2178,8 +2038,8 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
                         value={newAdmin.role}
                         onChange={(e) => setNewAdmin(prev => ({ ...prev, role: e.target.value as 'admin' | 'teacher' | 'parent' | 'other' }))}
                       >
-                        <option value="teacher">Standard Teacher (teacher â€” Employee Portal)</option>
-                        <option value="other">Custom Employee (other â€” Employee Portal)</option>
+                        <option value="teacher">Standard Teacher (teacher — Employee Portal)</option>
+                        <option value="other">Custom Employee (other — Employee Portal)</option>
                       </select>
                     </div>
                   </div>
@@ -2229,7 +2089,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
                   {loadingPermissions ? (
                     <div className="flex items-center justify-center gap-2 py-12">
                       <Loader2 size={16} className="animate-spin text-violet-500" />
-                      <span className="text-sm text-slate-500 dark:text-slate-500">Loading teachersâ€¦</span>
+                      <span className="text-sm text-slate-500 dark:text-slate-500">Loading teachers…</span>
                     </div>
                   ) : teachersAccess.length === 0 ? (
                     <div className="px-5 py-8 text-center text-sm text-slate-400 dark:text-slate-500">No teachers registered.</div>
@@ -2237,7 +2097,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
                     <div key={teacher._id} className="flex items-center justify-between px-5 py-3 hover:bg-slate-50 dark:bg-slate-900 transition-colors">
                       <div>
                         <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">{teacher.name}</div>
-                        <div className="text-[11px] text-slate-400 dark:text-slate-500">ID: {teacher.employeeId || 'N/A'} Â· Class: {teacher.assignedClass}</div>
+                        <div className="text-[11px] text-slate-400 dark:text-slate-500">ID: {teacher.employeeId || 'N/A'} · Class: {teacher.assignedClass}</div>
                       </div>
                       <label className="relative flex-shrink-0 cursor-pointer">
                         <input type="checkbox" className="sr-only peer" checked={teacher.status === 'active'}
@@ -2263,7 +2123,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
                   {loadingPermissions ? (
                     <div className="flex items-center justify-center gap-2 py-12">
                       <Loader2 size={16} className="animate-spin text-violet-500" />
-                      <span className="text-sm text-slate-500 dark:text-slate-500">Loading configâ€¦</span>
+                      <span className="text-sm text-slate-500 dark:text-slate-500">Loading config…</span>
                     </div>
                   ) : Array.from(new Set(students.map(s => s.class))).sort().length === 0 ? (
                     <div className="px-5 py-8 text-center text-sm text-slate-400 dark:text-slate-500">No classes found.</div>
@@ -2274,7 +2134,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
                         <div>
                           <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Class {className}</div>
                           <div className={`text-[11px] font-semibold ${isEnabled ? 'text-emerald-600' : 'text-rose-500'}`}>
-                            {isEnabled ? 'âœ“ Open for Mark Entry' : 'âœ— Locked'}
+                            {isEnabled ? '✓ Open for Mark Entry' : '✕ Locked'}
                           </div>
                         </div>
                         <label className="relative flex-shrink-0 cursor-pointer">
@@ -2329,7 +2189,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
                     </div>
                   </div>
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${whatsappSentCount >= whatsappLimit ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
-                    {whatsappSentCount >= whatsappLimit ? 'âš  Limit Reached' : 'Active'}
+                    {whatsappSentCount >= whatsappLimit ? '⚠️ Limit Reached' : 'Active'}
                   </span>
                 </div>
                 <div className="px-5 py-4 flex flex-col gap-3">
@@ -2480,7 +2340,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
                                   <div key={i} className="flex items-center gap-1.5 text-[11px]">
                                     <span className="w-4 h-4 rounded-full bg-slate-100 dark:bg-slate-700 text-[9px] font-bold flex items-center justify-center text-slate-500">{inst.installmentNo}</span>
                                     <span className="font-semibold text-slate-700 dark:text-slate-300">&#8377;{Number(inst.amount).toLocaleString()}</span>
-                                    {inst.dueDate && <span className="text-slate-400">Â· {new Date(inst.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>}
+                                    {inst.dueDate && <span className="text-slate-400">· {new Date(inst.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>}
                                   </div>
                                 ))}
                               </div>
@@ -2525,7 +2385,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
                       <div className="size-stats-grid">
                         <div className="size-stat-box">
                           <span className="box-title">Total Collected</span>
-                          <span className="box-value">â‚¹{collectionsData.totalCollected.toLocaleString()}</span>
+                          <span className="box-value">₹{collectionsData.totalCollected.toLocaleString()}</span>
                         </div>
                         <div className="size-stat-box">
                           <span className="box-title">Payments</span>
@@ -2534,7 +2394,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
                         {Object.entries(collectionsData.byMode || {}).map(([mode, amt]: [string, any]) => (
                           <div className="size-stat-box" key={mode}>
                             <span className="box-title" style={{ textTransform: 'capitalize' }}>{mode}</span>
-                            <span className="box-value">â‚¹{Number(amt).toLocaleString()}</span>
+                            <span className="box-value">₹{Number(amt).toLocaleString()}</span>
                           </div>
                         ))}
                       </div>
@@ -2561,7 +2421,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
                                   <td><strong>{p.receiptNo}</strong></td>
                                   <td>{p.studentName} ({p.admissionNo})</td>
                                   <td>Class {p.class}-{p.section}</td>
-                                  <td style={{ textAlign: 'center', fontWeight: 700 }}>â‚¹{p.amount.toLocaleString()}</td>
+                                  <td style={{ textAlign: 'center', fontWeight: 700 }}>₹{p.amount.toLocaleString()}</td>
                                   <td style={{ textAlign: 'center', textTransform: 'capitalize' }}>{p.paymentMode}</td>
                                 </tr>
                               ))
@@ -2655,18 +2515,16 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
                               <span className="text-xs text-slate-400 dark:text-slate-500 ml-1">({log.role || 'n/a'})</span>
                             </td>
                             <td className="px-5 py-3.5">
-                              <span className={`text-[11px] font-bold px-2 py-0.5 rounded font-mono ${
-                                log.method === 'GET' ? 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300' :
-                                log.method === 'POST' ? 'bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' :
-                                log.method === 'PUT' || log.method === 'PATCH' ? 'bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300' :
-                                'bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300'
-                              }`}>{log.method}</span>
+                              <span className={`text-[11px] font-bold px-2 py-0.5 rounded font-mono ${log.method === 'GET' ? 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300' :
+                                  log.method === 'POST' ? 'bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' :
+                                    log.method === 'PUT' || log.method === 'PATCH' ? 'bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300' :
+                                      'bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300'
+                                }`}>{log.method}</span>
                             </td>
                             <td className="px-5 py-3.5 text-[11px] text-slate-500 dark:text-slate-400 font-mono max-w-xs truncate">{log.path}</td>
                             <td className="px-5 py-3.5 text-center">
-                              <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-bold ${
-                                log.statusCode < 400 ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' : 'bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300'
-                              }`}>{log.statusCode}</span>
+                              <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-bold ${log.statusCode < 400 ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' : 'bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300'
+                                }`}>{log.statusCode}</span>
                             </td>
                             <td className="px-5 py-3.5 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{new Date(log.createdAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
                           </tr>

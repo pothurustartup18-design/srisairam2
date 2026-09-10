@@ -19,6 +19,7 @@ interface UsePhoneOtpOptions {
    */
   verifiedNumberSnapshotAt?: 'send' | 'verify';
   /** AdminTeachers exposes the sandbox OTP code as separate state; AdminSettings surfaces it via toast only. Default: true. */
+  exposeDevOtpCode?: boolean;
   /** AdminSettings additionally requires `res.ok`; AdminTeachers checks `data.success` only. Default: false. */
   requireResOk?: boolean;
   /** Auto-clear verification state once the phone field is emptied. Default: true. */
@@ -29,6 +30,7 @@ export function usePhoneOtp({
   phone,
   showToast,
   verifiedNumberSnapshotAt = 'verify',
+  exposeDevOtpCode = true,
   requireResOk = false,
   autoResetOnEmptyPhone = true,
 }: UsePhoneOtpOptions) {
@@ -38,6 +40,7 @@ export function usePhoneOtp({
   const [verifiedPhoneNum, setVerifiedPhoneNum] = useState('');
   const [sendingOtp, setSendingOtp] = useState(false);
   const [verifyingOtp, setVerifyingOtp] = useState(false);
+  const [devOtpCode, setDevOtpCode] = useState('');
 
   useEffect(() => {
     if (autoResetOnEmptyPhone && !phone) {
@@ -67,6 +70,7 @@ export function usePhoneOtp({
       return;
     }
     setSendingOtp(true);
+    if (exposeDevOtpCode) setDevOtpCode('');
     try {
       const res = await fetch(`${API_BASE}/settings/verify-phone/send`, {
         method: 'POST',
@@ -80,7 +84,12 @@ export function usePhoneOtp({
         setPhoneVerified(false);
         setPhoneOtpCode('');
         if (verifiedNumberSnapshotAt === 'send') setVerifiedPhoneNum(rawPhone);
-        showToast?.(data.message || 'OTP sent to WhatsApp.', 'success');
+        if (data.otpCode) {
+          if (exposeDevOtpCode) setDevOtpCode(data.otpCode);
+          showToast?.(`OTP generated (WhatsApp blocked in sandbox). Code: ${data.otpCode}`, 'success');
+        } else {
+          showToast?.(data.message || 'OTP sent to WhatsApp.', 'success');
+        }
       } else {
         showToast?.(data.message || 'Failed to send OTP.', 'error');
       }
@@ -122,6 +131,7 @@ export function usePhoneOtp({
     setPhoneOtpCode('');
     setPhoneVerified(false);
     setVerifiedPhoneNum('');
+    setDevOtpCode('');
   };
 
   return {
@@ -132,6 +142,7 @@ export function usePhoneOtp({
     verifiedPhoneNum,
     sendingOtp,
     verifyingOtp,
+    devOtpCode,
     handleSendPhoneOtp,
     handleVerifyPhoneOtp,
     resetOtpState,
