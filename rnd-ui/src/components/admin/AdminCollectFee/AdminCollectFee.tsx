@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import './AdminCollectFee.css';
 import type { StudentData } from '../../../types';
 import { ArrowLeft, Search, CheckCircle2, CreditCard, Download, ExternalLink } from 'lucide-react';
+import { API_BASE } from '../../../constants';
+import { getAccessToken } from '../../../services/api';
 
 interface AdminCollectFeeProps {
   students: StudentData[];
@@ -42,6 +44,7 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
   const [paymentAmount, setPaymentAmount] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [receipt, setReceipt] = useState<any | null>(null);
+  const [whatsappStatus, setWhatsappStatus] = useState<'sent' | 'failed' | null>(null);
 
   useEffect(() => {
     if (initialStudentId) {
@@ -94,6 +97,41 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
       if (result) {
         setReceipt(result);
         setStep('success');
+        setWhatsappStatus(null);
+
+        // Payment is already recorded server-side at this point — generating
+        // the PDF and dispatching the WhatsApp receipt is best-effort on top
+        // of that, so its failure must not block the success screen. It uses
+        // the approved fee_receipt template (see rnd-service dashboard.routes
+        // POST /upload-receipt-pdf), never a free-form message.
+        if (generateReceiptPDF) {
+          try {
+            const pdfBase64 = await generateReceiptPDF(result, selectedStudent);
+            const token = getAccessToken();
+            const headers: HeadersInit = { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+            const res = await fetch(`${API_BASE}/dashboard/upload-receipt-pdf`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({
+                receiptNo: result.receiptNo,
+                pdfBase64,
+                recipient: result.recipient || selectedStudent.whatsappNo,
+                amount: result.amount,
+                feeType: result.feeType,
+              }),
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+              setWhatsappStatus('sent');
+            } else {
+              setWhatsappStatus('failed');
+              showToast(data.message || 'Payment recorded, but the WhatsApp receipt could not be sent.', 'error');
+            }
+          } catch {
+            setWhatsappStatus('failed');
+            showToast('Payment recorded, but the WhatsApp receipt could not be sent.', 'error');
+          }
+        }
       }
     } catch {
       showToast('Failed to record payment. Please try again.', 'error');
@@ -477,7 +515,11 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
                 <CheckCircle2 size={40} color="#059669" />
               </div>
               <h2 className="cf-success-title">Payment Recorded!</h2>
-              <p className="cf-success-sub">WhatsApp receipt has been sent to parent.</p>
+              <p className="cf-success-sub">
+                {whatsappStatus === 'sent' && 'WhatsApp receipt has been sent to parent.'}
+                {whatsappStatus === 'failed' && 'Payment recorded — WhatsApp receipt could not be sent. Try Download PDF and share it manually.'}
+                {whatsappStatus === null && 'Sending WhatsApp receipt to parent…'}
+              </p>
 
               {/* Receipt Detail */}
               <div className="cf-receipt-box">
