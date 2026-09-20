@@ -11,7 +11,9 @@ import { Button, Badge, EmptyState } from '../../ui';
 // ─── Types (unchanged) ────────────────────────────────────────────────────────
 interface NewEventForm {
   title: string; description: string; date: string;
-  media: string[]; sendAlertsTo: 'none' | 'parents' | 'teachers' | 'both';
+  media: string[];
+  mediaAttachments?: { s3Key: string; filename: string; contentType?: string; size?: number; mediaType?: string }[];
+  sendAlertsTo: 'none' | 'parents' | 'teachers' | 'both';
   classes: string[]; sections: string[]; scheduledAlertTime: string;
   type?: 'event' | 'notice';
 }
@@ -77,7 +79,7 @@ const AdminEvents: React.FC<AdminEventsProps> = ({
 
   const handleFormTabSwitch = (tab: 'notice' | 'event') => {
     setFormTab(tab);
-    onNewEventChange({ type: tab, date: tab === 'notice' ? getTodayDateString() : '', media: [] });
+    onNewEventChange({ type: tab, date: tab === 'notice' ? getTodayDateString() : '', media: [], mediaAttachments: [] });
   };
 
   React.useEffect(() => {

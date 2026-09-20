@@ -317,6 +317,11 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
     description: '',
     date: '',
     media: [] as string[],
+    // Durable per-file metadata (s3Key, not a presigned URL) — sent alongside
+    // `media` so the backend can save it to Event.mediaAttachments and build
+    // the permanent, non-expiring gallery link for the WhatsApp alert. Same
+    // order/length as `media`, appended together in handleMediaUpload.
+    mediaAttachments: [] as { s3Key: string; filename: string; contentType?: string; size?: number; mediaType?: string }[],
     sendAlertsTo: 'none' as 'none' | 'parents' | 'teachers' | 'both',
     classes: [] as string[],
     sections: [] as string[],
@@ -1101,7 +1106,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
     setUploadingMedia(true);
 
     const uploadPromises = files.map((file) => {
-      return new Promise<string>((resolve, reject) => {
+      return new Promise<{ url: string; s3Key: string; filename: string; contentType?: string; size?: number; mediaType?: string }>((resolve, reject) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
         reader.onload = async () => {
@@ -1114,7 +1119,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
             });
             const data = await res.json();
             if (data.success) {
-              resolve(data.url);
+              resolve({ url: data.url, s3Key: data.s3Key, filename: data.filename, contentType: data.contentType, size: data.size, mediaType: data.mediaType });
             } else {
               reject(new Error('Failed to upload ' + file.name));
             }
@@ -1127,12 +1132,13 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
     });
 
     try {
-      const uploadedUrls = await Promise.all(uploadPromises);
+      const uploaded = await Promise.all(uploadPromises);
       setNewEvent(prev => ({
         ...prev,
-        media: [...prev.media, ...uploadedUrls]
+        media: [...prev.media, ...uploaded.map(u => u.url)],
+        mediaAttachments: [...prev.mediaAttachments, ...uploaded.map(u => ({ s3Key: u.s3Key, filename: u.filename, contentType: u.contentType, size: u.size, mediaType: u.mediaType }))]
       }));
-      showToast(`${uploadedUrls.length} file(s) successfully uploaded.`);
+      showToast(`${uploaded.length} file(s) successfully uploaded.`);
     } catch (err: any) {
       console.error(err);
       showToast(err.message || 'Some uploads failed.', 'error');
@@ -1145,7 +1151,8 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
   const handleRemoveMedia = (indexToRemove: number) => {
     setNewEvent(prev => ({
       ...prev,
-      media: prev.media.filter((_, idx) => idx !== indexToRemove)
+      media: prev.media.filter((_, idx) => idx !== indexToRemove),
+      mediaAttachments: prev.mediaAttachments.filter((_, idx) => idx !== indexToRemove)
     }));
   };
 
@@ -1163,6 +1170,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
           description: newEvent.description,
           date: newEvent.date,
           media: newEvent.media,
+          mediaAttachments: newEvent.mediaAttachments,
           type: newEvent.type || 'notice',
           sendAlertsTo: newEvent.sendAlertsTo,
           classes: newEvent.classes,
@@ -1178,6 +1186,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
           description: '',
           date: '',
           media: [],
+          mediaAttachments: [],
           sendAlertsTo: 'none',
           classes: [],
           sections: [],

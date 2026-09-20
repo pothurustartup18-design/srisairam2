@@ -30,8 +30,9 @@ function buildAlertTemplate(opts: {
 }
 import { requirePermission } from '../../middlewares/permission.middleware';
 import { audit } from '../../middlewares/audit.middleware';
-import { getS3Client, getPresignedDownloadUrl } from '../../services/s3.service';
+import { getS3Client, getPresignedDownloadUrl, getMediaType } from '../../services/s3.service';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { IEventAttachment } from '../../models/event.model';
 
 const router = Router();
 
@@ -91,7 +92,7 @@ router.post('/broadcast', requirePermission('events:manage'), audit('broadcast:s
 // Create a new event
 router.post('/', requirePermission('events:manage'), async (req: Request, res: Response) => {
   try {
-    const { title, description, date, media, type, sendAlertsTo, classes, sections, scheduledAlertTime } = req.body;
+    const { title, description, date, media, mediaAttachments, type, sendAlertsTo, classes, sections, scheduledAlertTime } = req.body;
 
     if (!title || !date) {
       return res.status(400).json({ success: false, message: 'Title and date are required.' });
@@ -99,11 +100,26 @@ router.post('/', requirePermission('events:manage'), async (req: Request, res: R
 
     let createdEvent: any;
 
+    // Durable attachment metadata (s3Key, not a presigned URL) — see
+    // event.model.ts. Source of truth for the permanent public gallery link.
+    const attachments: IEventAttachment[] = Array.isArray(mediaAttachments)
+      ? mediaAttachments
+          .filter((a: any) => a && typeof a.s3Key === 'string' && a.s3Key)
+          .map((a: any) => ({
+            s3Key: a.s3Key,
+            filename: a.filename || String(a.s3Key).split('/').pop() || 'attachment',
+            contentType: a.contentType,
+            size: typeof a.size === 'number' ? a.size : undefined,
+            mediaType: a.mediaType || getMediaType(a.s3Key)
+          }))
+      : [];
+
     const event = new Event({
       title,
       description: description || '',
       date: new Date(date),
       media: media || [],
+      mediaAttachments: attachments,
       type: type || 'event',
       sendAlertsTo: sendAlertsTo || 'none'
     });
@@ -112,13 +128,26 @@ router.post('/', requirePermission('events:manage'), async (req: Request, res: R
 
     // Handle publishing alerts if specified
     if (sendAlertsTo && sendAlertsTo !== 'none') {
+      // The approved templates are text-only (no media header) — the only way
+      // a parent can reach the photos/videos is a link in the body. Rather
+      // than trust an admin to paste a raw (7-day, expiring) presigned URL
+      // into the description, append the PERMANENT gallery link here,
+      // server-side, using the real saved event's _id: GET
+      // /api/events/:eventId/media mints a fresh presigned URL for every
+      // attachment on each visit, so the link itself never expires.
+      const appHost = process.env.APP_HOST || 'localhost:5173';
+      const galleryLink = attachments.length > 0 ? `http://${appHost}/api/events/${createdEvent._id}/media` : null;
+      const descriptionForAlert = galleryLink
+        ? `${description || ''}${description ? '\n\n' : ''}📎 View photos & attachments: ${galleryLink}`
+        : description;
+
       // `alertMsg` is kept only for the ScheduledAlert / ERP history record —
       // actual WhatsApp delivery uses the approved template below.
-      const alertMsg = `SchoolHub Event: "${title}" is scheduled on ${new Date(date).toLocaleDateString()}. Description: ${description || ''}`;
+      const alertMsg = `SchoolHub Event: "${title}" is scheduled on ${new Date(date).toLocaleDateString()}. Description: ${descriptionForAlert || ''}`;
       const mediaList: string[] = Array.isArray(media) ? media : (media ? [media] : []);
       const audience = sendAlertsTo as 'parents' | 'teachers' | 'both';
       const filters = { classes: classes || [], sections: sections || [] };
-      const alertTemplate = buildAlertTemplate({ type, title, description, date });
+      const alertTemplate = buildAlertTemplate({ type, title, description: descriptionForAlert, date });
 
       if (scheduledAlertTime) {
         // --- SCHEDULED ALERT ---
@@ -205,12 +234,22 @@ router.post('/media/upload', requirePermission('events:manage'), async (req: Req
       const s3Url = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION || 'ap-southeast-2'}.amazonaws.com/${s3Key}`;
       console.log(`Saved event media to AWS S3: ${s3Url}`);
 
+      // Preview-only — expires in 7 days (S3's max). The durable reference is
+      // s3Key below, which the client must send back on event creation so it
+      // can be saved to mediaAttachments; that's what the PERMANENT gallery
+      // link (GET /api/events/:eventId/media) mints fresh presigned URLs from
+      // on every visit, so parents can open it any time.
       const presignedUrl = await getPresignedDownloadUrl(s3Key);
 
       return res.status(200).json({
         success: true,
         message: 'Media uploaded successfully to S3.',
         url: presignedUrl,
+        s3Key,
+        filename: name,
+        contentType,
+        size: fileBuffer.length,
+        mediaType: getMediaType(s3Key),
       });
     }
 
