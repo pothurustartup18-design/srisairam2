@@ -979,35 +979,6 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
       doc.text('Scan the QR code to verify this transaction on the portal.', 14, y + 15);
       doc.text('Verified by: SchoolHub Security Engine', 14, y + 19);
 
-      // Embed the Principal signature — same source used on report-card PDFs
-      // (school-profile.principalInfo.signatureUrl via GET
-      // /school-profile/principal-signature, which returns an already
-      // presigned, directly-fetchable URL). Best-effort: fetched as a blob
-      // and converted to a data URI locally (avoids the CORS/canvas-taint
-      // failure mode that hung the QR code before), so any failure here just
-      // leaves the plain signature line rather than blocking the receipt.
-      try {
-        const sigRes = await fetch(`${API_BASE}/school-profile/principal-signature`, {
-          signal: AbortSignal.timeout(5000),
-        });
-        const sigJson = await sigRes.json();
-        if (sigJson.success && sigJson.data?.signatureUrl) {
-          const imgRes = await fetch(sigJson.data.signatureUrl, { signal: AbortSignal.timeout(5000) });
-          if (imgRes.ok) {
-            const blob = await imgRes.blob();
-            const sigDataUri = await new Promise<string>((res, rej) => {
-              const reader = new FileReader();
-              reader.onloadend = () => res(reader.result as string);
-              reader.onerror = rej;
-              reader.readAsDataURL(blob);
-            });
-            doc.addImage(sigDataUri, 'PNG', 16, y + 17, 26, 9);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to load principal signature for receipt:', err);
-      }
-
       // Signature line in verification box
       doc.setDrawColor(148, 163, 184);
       doc.line(14, y + 27, 55, y + 27);
