@@ -127,6 +127,14 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   const updateSchoolProfile = async (updates: Partial<SchoolProfileData>): Promise<boolean> => {
+    // Kept to roll back to if the persist below fails — an optimistic update
+    // that silently "succeeds" while the backend rejects it is worse than no
+    // update at all: every other screen (including receipt/report-card
+    // generation, which read this same context — no per-generation refetch,
+    // by design) keeps showing the unsaved value until the next full reload
+    // quietly reverts it, with no trigger ever having told the admin it
+    // didn't actually save.
+    const previousProfile = schoolProfile;
     try {
       // 1. Instantly update local state and localStorage for instant responsive UI
       const newProfile: SchoolProfileData = {
@@ -154,7 +162,7 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
 
       const json = await res.json();
-      if (json.success && json.data) {
+      if (res.ok && json.success && json.data) {
         const synced: SchoolProfileData = {
           ...defaultProfile,
           ...json.data,
@@ -168,9 +176,15 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         localStorage.setItem('schoolhub_school_profile', JSON.stringify(synced));
         return true;
       }
-      return true; // Local state & localStorage updated successfully
+      // Backend rejected the save (validation error, auth failure, etc.) —
+      // roll back so this session doesn't keep showing an unsaved value.
+      setSchoolProfile(previousProfile);
+      localStorage.setItem('schoolhub_school_profile', JSON.stringify(previousProfile));
+      return false;
     } catch {
-      return true;
+      setSchoolProfile(previousProfile);
+      localStorage.setItem('schoolhub_school_profile', JSON.stringify(previousProfile));
+      return false;
     }
   };
 

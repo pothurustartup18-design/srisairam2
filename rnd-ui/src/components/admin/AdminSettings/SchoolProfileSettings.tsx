@@ -99,7 +99,10 @@ export default function SchoolProfileSettings({ showToast, onBack }: SchoolProfi
     setSaving(true);
     const success = await updateSchoolProfile(formData);
     setSaving(false);
-    showToast(success ? 'School Profile saved successfully!' : 'School Profile updated.', 'success');
+    showToast(
+      success ? 'School Profile saved successfully!' : 'Failed to save School Profile. Please try again.',
+      success ? 'success' : 'error'
+    );
   };
 
   return (
