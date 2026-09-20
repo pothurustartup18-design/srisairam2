@@ -329,6 +329,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
     type: 'notice' as 'notice' | 'event'
   });
   const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [mediaUploadPercent, setMediaUploadPercent] = useState<number | null>(null);
   const [uploadedUrl, setUploadedUrl] = useState('');
 
   // ─── Delete confirmation modal states ────────────────────────────────────────
@@ -1100,29 +1101,65 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
   };
 
   // â”€â”€â”€ Event Actions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Uploads via XMLHttpRequest (not fetch — fetch exposes no upload progress
+  // events) so the UI can show a real byte-level percentage instead of an
+  // indeterminate "Uploading…" label.
+  const uploadEventMediaWithProgress = (
+    file: File,
+    base64Data: string,
+    onProgress: (loadedBytes: number, totalBytes: number) => void
+  ): Promise<{ url: string; s3Key: string; filename: string; contentType?: string; size?: number; mediaType?: string }> => {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${API_BASE}/events/media/upload`);
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      xhr.upload.onprogress = (evt) => {
+        if (evt.lengthComputable) onProgress(evt.loaded, evt.total);
+      };
+      xhr.onload = () => {
+        let data: any;
+        try { data = JSON.parse(xhr.responseText); } catch { data = null; }
+        if (xhr.status >= 200 && xhr.status < 300 && data?.success) {
+          onProgress(1, 1); // this file's XHR body finished sending
+          resolve({ url: data.url, s3Key: data.s3Key, filename: data.filename, contentType: data.contentType, size: data.size, mediaType: data.mediaType });
+        } else {
+          reject(new Error(data?.message || `Failed to upload ${file.name}`));
+        }
+      };
+      xhr.onerror = () => reject(new Error(`Failed to upload ${file.name}`));
+      xhr.send(JSON.stringify({ fileName: file.name, mediaBase64: base64Data }));
+    });
+  };
+
   const handleMediaUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files ? Array.from(e.target.files) : [];
     if (files.length === 0) return;
     setUploadingMedia(true);
+    setMediaUploadPercent(0);
 
-    const uploadPromises = files.map((file) => {
+    // Per-file loaded/total bytes, summed into one overall percentage across
+    // the whole batch — simpler and more useful here than N separate bars.
+    const loadedByFile = new Array(files.length).fill(0);
+    const totalByFile = new Array(files.length).fill(0);
+    const recomputeOverall = () => {
+      const loaded = loadedByFile.reduce((a, b) => a + b, 0);
+      const total = totalByFile.reduce((a, b) => a + b, 0);
+      setMediaUploadPercent(total > 0 ? Math.round((loaded / total) * 100) : 0);
+    };
+
+    const uploadPromises = files.map((file, index) => {
       return new Promise<{ url: string; s3Key: string; filename: string; contentType?: string; size?: number; mediaType?: string }>((resolve, reject) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
         reader.onload = async () => {
           const base64Data = reader.result as string;
           try {
-            const res = await fetch(`${API_BASE}/events/media/upload`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ fileName: file.name, mediaBase64: base64Data }),
+            const uploaded = await uploadEventMediaWithProgress(file, base64Data, (loaded, total) => {
+              loadedByFile[index] = loaded;
+              totalByFile[index] = total;
+              recomputeOverall();
             });
-            const data = await res.json();
-            if (data.success) {
-              resolve({ url: data.url, s3Key: data.s3Key, filename: data.filename, contentType: data.contentType, size: data.size, mediaType: data.mediaType });
-            } else {
-              reject(new Error('Failed to upload ' + file.name));
-            }
+            resolve(uploaded);
           } catch (err) {
             reject(err);
           }
@@ -1144,6 +1181,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
       showToast(err.message || 'Some uploads failed.', 'error');
     } finally {
       setUploadingMedia(false);
+      setMediaUploadPercent(null);
       e.target.value = '';
     }
   };
@@ -1720,6 +1758,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                   events={events}
                   newEvent={newEvent}
                   uploadingMedia={uploadingMedia}
+                  mediaUploadPercent={mediaUploadPercent}
                   uploadedUrl={uploadedUrl}
                   onNewEventChange={(fields) => setNewEvent(prev => ({ ...prev, ...fields }))}
                   onCreateEvent={handleCreateEvent}

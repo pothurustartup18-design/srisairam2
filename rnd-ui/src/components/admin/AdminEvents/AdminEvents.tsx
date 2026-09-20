@@ -19,7 +19,7 @@ interface NewEventForm {
 }
 interface AdminEventsProps {
   events: EventData[]; newEvent: NewEventForm;
-  uploadingMedia: boolean; uploadedUrl: string;
+  uploadingMedia: boolean; mediaUploadPercent?: number | null; uploadedUrl: string;
   onNewEventChange: (fields: Partial<NewEventForm>) => void;
   onCreateEvent: (e: React.FormEvent) => void;
   onMediaUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -62,7 +62,7 @@ function SectionDivider({ label }: { label: string }) {
 }
 
 const AdminEvents: React.FC<AdminEventsProps> = ({
-  events, newEvent, uploadingMedia, onNewEventChange, onCreateEvent,
+  events, newEvent, uploadingMedia, mediaUploadPercent, onNewEventChange, onCreateEvent,
   onMediaUpload, onRemoveMedia, onDeleteEvent, classesList = [],
 }) => {
   const availableClasses = sortClasses(Array.from(new Set(classesList.map(c => c.className))));
@@ -156,16 +156,30 @@ const AdminEvents: React.FC<AdminEventsProps> = ({
                 <div className="flex flex-col gap-1.5">
                   <label className={labelCls}>Cover Media <span className="text-slate-300 normal-case font-normal">images / videos / audio</span></label>
                   <div className={cn(
-                    'flex items-center justify-between p-3 border border-dashed rounded-lg transition-colors',
+                    'flex flex-col gap-2 p-3 border border-dashed rounded-lg transition-colors',
                     uploadingMedia ? 'border-blue-300 bg-blue-50' : 'border-slate-300 bg-slate-50 hover:border-slate-400'
                   )}>
-                    <span className="text-xs text-slate-400">
-                      {uploadingMedia ? 'Uploading…' : newEvent.media?.length > 0 ? `${newEvent.media.length} file(s) attached` : 'No files selected'}
-                    </span>
-                    <label className="flex items-center gap-1 text-xs font-bold text-blue-600 cursor-pointer hover:text-blue-800 transition-colors">
-                      <Plus size={12} /> Add Files
-                      <input type="file" accept="image/*,video/*,audio/*" multiple className="hidden" onChange={onMediaUpload} />
-                    </label>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-slate-400">
+                        {uploadingMedia
+                          ? `Uploading… ${mediaUploadPercent ?? 0}%`
+                          : newEvent.media?.length > 0 ? `${newEvent.media.length} file(s) attached` : 'No files selected'}
+                      </span>
+                      <label className={cn(
+                        'flex items-center gap-1 text-xs font-bold transition-colors',
+                        uploadingMedia ? 'text-slate-300 cursor-not-allowed' : 'text-blue-600 cursor-pointer hover:text-blue-800'
+                      )}>
+                        <Plus size={12} /> Add Files
+                        <input type="file" accept="image/*,video/*,audio/*" multiple className="hidden"
+                          disabled={uploadingMedia} onChange={onMediaUpload} />
+                      </label>
+                    </div>
+                    {uploadingMedia && (
+                      <div className="h-1.5 w-full bg-blue-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-blue-500 rounded-full transition-[width] duration-200"
+                          style={{ width: `${mediaUploadPercent ?? 0}%` }} />
+                      </div>
+                    )}
                   </div>
 
                   {newEvent.media?.length > 0 && (
@@ -254,8 +268,10 @@ const AdminEvents: React.FC<AdminEventsProps> = ({
             )}
 
             {/* Submit */}
-            <Button type="submit" className="w-full justify-center mt-1">
-              {formTab === 'notice' ? '📢 Publish Notice & Broadcast' : '🎉 Publish Event & Broadcast'}
+            <Button type="submit" className="w-full justify-center mt-1" disabled={uploadingMedia}>
+              {uploadingMedia
+                ? `Uploading files… ${mediaUploadPercent ?? 0}%`
+                : formTab === 'notice' ? '📢 Publish Notice & Broadcast' : '🎉 Publish Event & Broadcast'}
             </Button>
           </div>
         </form>
