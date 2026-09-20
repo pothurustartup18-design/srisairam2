@@ -10,7 +10,6 @@ import { API_BASE, formatClassName } from '../../../constants';
 import { getAccessToken } from '../../../services/api';
 import { cn } from '../../../lib/utils';
 import { Button, Badge, PageHeader, DataTable, Th, Td, Tr, EmptyState, Modal, Drawer, MobileRowCard, MobileCardList } from '../../ui';
-import { useSchool } from '../../../context/schoolContext';
 
 type MarksStep = 'list' | 'create' | 'entry';
 
@@ -191,7 +190,6 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
   onSubmitTemplate,
   isLocked = false,
 }) => {
-  const { schoolProfile } = useSchool();
   const [validationErrors, setValidationErrors] = useState<Record<string, Record<string, boolean>>>({});
   // Edit confirmation dialog state
   const [showEditConfirm, setShowEditConfirm] = useState(false);
@@ -220,35 +218,30 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
   }, [selectedExam?._id]);
 
   const handleSendWhatsAppAlert = async (student: StudentData, existingPdfUrl?: string) => {
+    if (!selectedExam) return;
     setSendingWhatsappId(student.id);
     const studentName = student.name || `${student.firstName || ''} ${student.lastName || ''}`.trim();
-    const schoolName = schoolProfile?.schoolInfo?.schoolName || 'SchoolHub';
-    const examNameVal = selectedExam?.examName || 'the examination';
 
     try {
       // Auto-generate + upload PDF if not yet available
-      let pdfUrl = existingPdfUrl;
-      if (!pdfUrl) {
-        if (!selectedExam) throw new Error('No exam selected');
+      if (!existingPdfUrl) {
         showToast('Generating report card before sending...', 'success');
-        pdfUrl = await uploadSingleStudentReportPDF(selectedExam, student, studentRemarks, teacherName);
+        await uploadSingleStudentReportPDF(selectedExam, student, studentRemarks, teacherName);
         // Refresh exam details so the eye/download buttons light up
         if (onLoadExamDetails) onLoadExamDetails(selectedExam._id);
       }
-
-      const englishMessage = `📊 *Report Card Ready*\n\nDear Parent,\n\nThe report card for your ward *${studentName}* for *${examNameVal}* has been successfully generated. 🎓\n\n👤 *Student:* ${studentName}\n📝 *Examination:* ${examNameVal}\n\n📄 The report card is attached to this message.\n\nThank you. 🙏\n\n*— ${schoolName}*`;
-      const teluguMessage = `📊 *రిపోర్ట్ కార్డ్ సిద్ధంగా ఉంది*\n\nప్రియమైన తల్లిదండ్రులారా,\n\nమీ బిడ్డ *${studentName}* కి సంబంధించిన *${examNameVal === 'the examination' ? 'పరీక్ష' : examNameVal}* ప్రగతి పత్రం (Report Card) విజయవంతంగా రూపొందించబడింది. 🎓\n\n👤 *విద్యార్థి:* ${studentName}\n📝 *పరీక్ష:* ${examNameVal === 'the examination' ? 'పరీక్ష' : examNameVal}\n\n📄 ఈ సందేశానికి ప్రగతి పత్రం జతచేయబడింది.\n\nధన్యవాదాలు. 🙏\n\n*— ${schoolName}*`;
-
-      const messageText = `${englishMessage}\n\n${teluguMessage}\n\n${pdfUrl}`;
 
       const token = getAccessToken();
       const headers: HeadersInit = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      const res = await fetch(`${API_BASE}/messages/student/${student.id}/whatsapp`, {
+      // Uses the pre-approved `report_card_notice` WhatsApp template (bypasses
+      // the 24h free-form messaging window) instead of a free-text message,
+      // which Meta silently rejects once that window has closed — see
+      // rnd-service/src/routes/teacher/marks.routes.ts's report-card/whatsapp route.
+      const res = await fetch(`${API_BASE}/marks/${selectedExam._id}/report-card/${student.id}/whatsapp`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ text: messageText })
       });
 
       const resData = await res.json();

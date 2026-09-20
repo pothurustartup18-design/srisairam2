@@ -355,12 +355,16 @@ const AdminMarks: React.FC<AdminMarksProps> = ({ students, teachers, classesList
     setSaving(false);
   };
 
-  const handleSubmitGrades = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedExam || !assignedTeacher) return;
+  // Persists the on-screen grade sheet (all students in the current class/exam)
+  // to the server. Report-card generation reads marks fresh from the backend,
+  // so it must always be preceded by this — otherwise it silently builds a
+  // report card from whatever was last saved (possibly nothing), ignoring
+  // any edits still sitting in local state. Returns false (and toasts) on
+  // validation/network failure so callers can abort generation.
+  const persistGrades = async (): Promise<boolean> => {
+    if (!selectedExam || !assignedTeacher) return false;
     const hasErrors = Object.values(validationErrors).some(se => Object.values(se).some(Boolean));
-    if (hasErrors) { showToast('Correct input errors before saving.', 'error'); return; }
-    setSaving(true);
+    if (hasErrors) { showToast('Correct input errors before saving.', 'error'); return false; }
     const payload = {
       examName: selectedExam.examName, classTeacherId: assignedTeacher._id, class: roomName, subjects: selectedExam.subjects,
       studentMarks: classStudents.map(s => {
@@ -373,16 +377,33 @@ const AdminMarks: React.FC<AdminMarksProps> = ({ students, teachers, classesList
       const headers: HeadersInit = { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
       const res  = await fetch(`${API_BASE}/marks`, { method: 'POST', headers, body: JSON.stringify(payload) });
       const data = await res.json();
-      if (data.success) { showToast('Grades saved successfully.'); setActiveStep('list'); setSelectedExam(null); loadExams(); }
-      else showToast(data.message || 'Failed.', 'error');
-    } catch { showToast('Server connection failed.', 'error'); }
-    finally { setSaving(false); }
+      if (data.success) return true;
+      showToast(data.message || 'Failed to save grades.', 'error');
+      return false;
+    } catch {
+      showToast('Server connection failed while saving grades.', 'error');
+      return false;
+    }
+  };
+
+  const handleSubmitGrades = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    const ok = await persistGrades();
+    if (ok) { showToast('Grades saved successfully.'); setActiveStep('list'); setSelectedExam(null); loadExams(); }
+    setSaving(false);
   };
 
   const handleGenerateStudentPDF = async (student: StudentData) => {
     if (!selectedExam) return;
     setGeneratingStudentId(student.id);
-    try { await uploadSingleStudentReportPDF(selectedExam, student, studentRemarks, assignedTeacher?.name || 'Class Teacher'); showToast(`Report card generated for ${student.name}!`); handleLoadExamDetails(selectedExam._id); }
+    try {
+      const saved = await persistGrades();
+      if (!saved) return;
+      await uploadSingleStudentReportPDF(selectedExam, student, studentRemarks, assignedTeacher?.name || 'Class Teacher');
+      showToast(`Report card generated for ${student.name}!`);
+      handleLoadExamDetails(selectedExam._id);
+    }
     catch (err: any) { showToast(err.message || 'Generation failed', 'error'); }
     finally { setGeneratingStudentId(null); }
   };
@@ -391,6 +412,8 @@ const AdminMarks: React.FC<AdminMarksProps> = ({ students, teachers, classesList
     if (!selectedExam || classStudents.length === 0) { showToast('No students found.', 'error'); return; }
     setDownloadingBulkPdf(true);
     try {
+      const saved = await persistGrades();
+      if (!saved) return;
       await generateReportCardPDF(selectedExam, classStudents, studentRemarks, assignedTeacher?.name || 'Class Teacher');
       showToast('Bulk Report Cards PDF downloaded successfully!', 'success');
     } catch (err) {
@@ -423,14 +446,18 @@ const AdminMarks: React.FC<AdminMarksProps> = ({ students, teachers, classesList
     finally { setSharingStudentId(null); }
   };
 
-  const handleSendWhatsAppAlert = async (student: StudentData, pdfUrl: string) => {
+  const handleSendWhatsAppAlert = async (student: StudentData) => {
+    if (!selectedExam) return;
     setSendingWhatsappId(student.id);
     const studentName = student.name || `${student.firstName || ''} ${student.lastName || ''}`.trim();
-    const messageText = `Dear Parent, the report card for ${studentName} for "${selectedExam?.examName}" is ready: ${pdfUrl}`;
     try {
       const token = getAccessToken();
       const headers: HeadersInit = { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
-      const res = await fetch(`${API_BASE}/messages/student/${student.id}/whatsapp`, { method: 'POST', headers, body: JSON.stringify({ text: messageText }) });
+      // Uses the pre-approved `report_card_notice` WhatsApp template (bypasses
+      // the 24h free-form messaging window) instead of a free-text message,
+      // which Meta silently rejects once that window has closed — see
+      // rnd-service/src/routes/teacher/marks.routes.ts's report-card/whatsapp route.
+      const res = await fetch(`${API_BASE}/marks/${selectedExam._id}/report-card/${student.id}/whatsapp`, { method: 'POST', headers });
       const d   = await res.json();
       if (res.ok && d.success) showToast(`WhatsApp alert sent to ${studentName}'s parent!`);
       else throw new Error(d.message || 'Failed');
@@ -1040,7 +1067,7 @@ const AdminMarks: React.FC<AdminMarksProps> = ({ students, teachers, classesList
                               </button>
                               <button className={iconActionBtn('text-[#25d366]', 'border-green-200', 'hover:bg-green-50')}
                                 title="Send WhatsApp" disabled={sendingWhatsappId === s.id}
-                                onClick={() => handleSendWhatsAppAlert(s, sRecord!.pdfUrl!)}>
+                                onClick={() => handleSendWhatsAppAlert(s)}>
                                 {sendingWhatsappId === s.id ? <Loader2 size={12} className="animate-spin" /> : <MessageCircle size={12} />}
                               </button>
                               <button className={iconActionBtn('text-emerald-600', 'border-emerald-200', 'hover:bg-emerald-50')}
@@ -1141,7 +1168,7 @@ const AdminMarks: React.FC<AdminMarksProps> = ({ students, teachers, classesList
                               </button>
                               <button className={iconActionBtn('text-[#25d366]', 'border-green-200', 'hover:bg-green-50') + ' !h-11 !w-11'}
                                 title="Send WhatsApp" disabled={sendingWhatsappId === s.id}
-                                onClick={() => handleSendWhatsAppAlert(s, sRecord!.pdfUrl!)}>
+                                onClick={() => handleSendWhatsAppAlert(s)}>
                                 {sendingWhatsappId === s.id ? <Loader2 size={14} className="animate-spin" /> : <MessageCircle size={14} />}
                               </button>
                               <button className={iconActionBtn('text-emerald-600', 'border-emerald-200', 'hover:bg-emerald-50') + ' !h-11 !w-11'}
