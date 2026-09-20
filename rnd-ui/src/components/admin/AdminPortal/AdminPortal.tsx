@@ -1113,6 +1113,12 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
       const xhr = new XMLHttpRequest();
       xhr.open('POST', `${API_BASE}/events/media/upload`);
       xhr.setRequestHeader('Content-Type', 'application/json');
+      // XHR bypasses window.fetch, so the global fetch interceptor in
+      // services/api.ts (which auto-attaches this header on every fetch())
+      // never runs here — it must be set explicitly, or every upload 401s.
+      const token = getAccessToken();
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.withCredentials = true;
       xhr.upload.onprogress = (evt) => {
         if (evt.lengthComputable) onProgress(evt.loaded, evt.total);
       };
