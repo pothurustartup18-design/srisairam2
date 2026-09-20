@@ -1,5 +1,6 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import jsPDF from 'jspdf';
+import QRCode from 'qrcode';
 import { Search, Sun, Moon, Bell, MessageCircle, Check, Menu } from 'lucide-react';
 
 import Toast from '../../shared/Toast/Toast';
@@ -764,7 +765,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
 
   // Render receipt PDF
   const generateReceiptPDF = (receiptData: any, student: StudentData): Promise<string> => {
-    return new Promise((resolve) => {
+    return new Promise(async (resolve) => {
       const doc = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
@@ -986,43 +987,27 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
       doc.setTextColor(51, 65, 85);
       doc.text('Authorized Cashier / Accounts Stamp', 14, y + 30);
 
-      // Generate Dynamic QR Code URL using window.location.origin
+      // Generate the QR code locally (same approach as the report-card PDF —
+      // see report-card/index.tsx's generateVerificationQrDataUri) instead of
+      // calling a third-party image API: no network dependency, so it can
+      // never hang or fail due to CORS/connectivity/rate limits.
       const originHost = window.location.origin;
       const verifyUrl = `${originHost}/?verify_token=${receiptData.receiptNo || receiptData.token}`;
-      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(verifyUrl)}`;
-
-      // Draw QR Code Image into PDF. The QR image comes from a third-party
-      // service (network call, can fail/CORS-taint/hang) — any failure here
-      // must still resolve with the receipt PDF (QR omitted) rather than
-      // leave this promise pending forever, which would silently block the
-      // WhatsApp send that runs after this in handleRecordPaymentSubmit.
-      let settled = false;
-      const finishWithoutQr = () => {
-        if (settled) return;
-        settled = true;
-        resolve(doc.output('datauristring'));
-      };
-      const img = new window.Image();
-      img.crossOrigin = 'Anonymous';
-      img.onload = () => {
-        if (settled) return;
-        try {
-          doc.addImage(img, 'PNG', pageWidth - 37, y + 3, 24, 24);
-          doc.setFontSize(6);
-          doc.setFont('helvetica', 'bold');
-          doc.setTextColor(30, 58, 138);
-          doc.text('SCAN TO VERIFY', pageWidth - 25, y + 29, { align: 'center' });
-          settled = true;
-          resolve(doc.output('datauristring'));
-        } catch (err) {
-          console.error('Failed to embed QR code into receipt PDF:', err);
-          finishWithoutQr();
-        }
-      };
-      img.onerror = finishWithoutQr;
-      // Third-party QR service may hang without ever firing load/error.
-      setTimeout(finishWithoutQr, 5000);
-      img.src = qrUrl;
+      try {
+        const qrDataUri = await QRCode.toDataURL(verifyUrl, {
+          margin: 0,
+          errorCorrectionLevel: 'M',
+          color: { dark: '#0F172A', light: '#FFFFFF' },
+        });
+        doc.addImage(qrDataUri, 'PNG', pageWidth - 37, y + 3, 24, 24);
+        doc.setFontSize(6);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(30, 58, 138);
+        doc.text('SCAN TO VERIFY', pageWidth - 25, y + 29, { align: 'center' });
+      } catch (err) {
+        console.error('Failed to generate/embed QR code into receipt PDF:', err);
+      }
+      resolve(doc.output('datauristring'));
     });
   };
 
