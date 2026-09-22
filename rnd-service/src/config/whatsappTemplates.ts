@@ -50,6 +50,9 @@
  *       media_url = the permanent gallery link (GET /api/events/:eventId/media).
  *       event_description must stay the admin's raw text here — do NOT
  *       concatenate the link into it (that's what caused the 132018s above).
+ *   transport_bus_alert          en  APPROVED  UTILITY    NAMED  BODY only
+ *       Verified against Meta 2026-09-22. body params: message, school_name.
+ *       No HEADER, so no media can ride along — text only.
  *
  * Every approved body text already contains BOTH the English and Telugu
  * sentences (where bilingual), so ONE template send covers both languages
@@ -70,7 +73,7 @@ export interface RegisteredTemplate {
   /** Exact Meta-approved language code for this template version. */
   language: string;
   /** Meta category, for documentation/observability only. */
-  category: 'attendance' | 'fees' | 'reports' | 'announcements';
+  category: 'attendance' | 'fees' | 'reports' | 'announcements' | 'transport';
   /**
    * Ordered named body parameters, exactly as approved
    * (the template's parameter_format is NAMED — these are `parameter_name`s,
@@ -192,6 +195,12 @@ export const WHATSAPP_TEMPLATES = {
     // media_url is a plain BODY param (this template has no HEADER
     // component) — must be a clean single-line URL, no newlines.
     parameters: ['event_title', 'event_date', 'event_description', 'media_url']
+  },
+  'transport.alert': {
+    metaName: 'transport_bus_alert',
+    language: 'en',
+    category: 'transport',
+    parameters: ['message', 'school_name']
   }
 } as const satisfies Record<string, RegisteredTemplate>;
 
@@ -206,13 +215,8 @@ export function getRegisteredTemplate(key: string): RegisteredTemplate | undefin
  * exists. Per policy these MUST NOT be sent as free-form WhatsApp (Meta rejects
  * proactive free-form outside the 24h window anyway). Each entry names the
  * template that needs to be created + approved in WhatsApp Manager.
- *
- * `blockedNotice(key)` returns the standard "not sent" payload for a route.
  */
 export const MISSING_TEMPLATES = {
-  'transport.alert':
-    'Transport / "school bus approaching" cluster alert. Needs an approved UTILITY template, ' +
-    'e.g. transport_bus_alert (fixed text) or transport_alert with a single {custom} param.',
   'staff.credentials':
     'Staff onboarding / password-reset credentials. staff_credentials_new and staff_credentials_reset are ' +
     'REJECTED by Meta; school_notification is PENDING. Needs new approved templates before any WhatsApp delivery.',
@@ -221,20 +225,6 @@ export const MISSING_TEMPLATES = {
     'template (e.g. otp_code with one {code} param + copy-code button). Currently sent free-form — allowed ' +
     'as an OTP exception, but delivery is unreliable to numbers outside an open conversation.'
 } as const;
-
-export type MissingTemplateKey = keyof typeof MISSING_TEMPLATES;
-
-export function blockedNotice(key: MissingTemplateKey) {
-  return {
-    success: false as const,
-    blocked: true as const,
-    reason: 'NO_APPROVED_TEMPLATE' as const,
-    missingTemplate: key,
-    message:
-      `No approved WhatsApp template exists for this notification, so it was NOT sent ` +
-      `(proactive free-form WhatsApp is disabled). ${MISSING_TEMPLATES[key]}`
-  };
-}
 
 export interface ResolvedTemplateMessage {
   /** Registry key, e.g. "attendance.full". */

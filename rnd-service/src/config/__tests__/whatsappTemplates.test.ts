@@ -7,8 +7,7 @@ import {
   WHATSAPP_TEMPLATES,
   getRegisteredTemplate,
   resolveTemplateMessage,
-  MISSING_TEMPLATES,
-  blockedNotice
+  MISSING_TEMPLATES
 } from '../whatsappTemplates';
 
 const NAME = { student_name_en: 'Harsha', student_name_te: 'Harsha' };
@@ -291,7 +290,7 @@ describe('announcement + event templates (MARKETING, text-only)', () => {
 });
 
 describe('registry completeness — every active production template is registered', () => {
-  it('has exactly the 11 expected keys → exact Meta names', () => {
+  it('has exactly the 12 expected keys → exact Meta names', () => {
     const expected: Record<string, string> = {
       'attendance.full': 'attendance_alert_full',
       'attendance.morning': 'attendance_alert_morning',
@@ -306,7 +305,8 @@ describe('registry completeness — every active production template is register
       'installment.overdue': 'installment_overdue',
       'announcement.broadcast': 'announcement_broadcast',
       'event.announcement': 'event_announcement',
-      'event.announcement_media': 'event_announcement_media'
+      'event.announcement_media': 'event_announcement_media',
+      'transport.alert': 'transport_bus_alert'
     };
     expect(Object.keys(WHATSAPP_TEMPLATES).sort()).toEqual(Object.keys(expected).sort());
     for (const [k, meta] of Object.entries(expected)) {
@@ -322,26 +322,32 @@ describe('registry completeness — every active production template is register
   });
 });
 
-describe('MISSING_TEMPLATES / blockedNotice — proactive features with no approved template', () => {
-  it('documents the 3 known gaps (fee.general_reminder now has an approved template)', () => {
-    expect(Object.keys(MISSING_TEMPLATES).sort()).toEqual(
-      ['auth.otp', 'staff.credentials', 'transport.alert'].sort()
-    );
+describe('MISSING_TEMPLATES — proactive features with no approved template', () => {
+  it('documents the 2 remaining gaps (fee reminder and transport alert now have approved templates)', () => {
+    expect(Object.keys(MISSING_TEMPLATES).sort()).toEqual(['auth.otp', 'staff.credentials'].sort());
     expect(Object.keys(MISSING_TEMPLATES)).not.toContain('fee.general_reminder');
+    expect(Object.keys(MISSING_TEMPLATES)).not.toContain('transport.alert');
+  });
+});
+
+describe('transport.alert — transport_bus_alert (UTILITY, text only)', () => {
+  it('maps to transport_bus_alert with params message + school_name and no media header', () => {
+    const def = getRegisteredTemplate('transport.alert')!;
+    expect(def.metaName).toBe('transport_bus_alert');
+    expect(def.parameters).toEqual(['message', 'school_name']);
+    expect(def.header).toBeUndefined();
   });
 
-  it('blockedNotice returns a non-success, non-retryable "not sent" payload', () => {
-    const n = blockedNotice('transport.alert');
-    expect(n.success).toBe(false);
-    expect(n.blocked).toBe(true);
-    expect(n.reason).toBe('NO_APPROVED_TEMPLATE');
-    expect(n.missingTemplate).toBe('transport.alert');
-    expect(n.message).toMatch(/was NOT sent/);
+  it('resolves with message + school_name', () => {
+    const res = resolveTemplateMessage('transport.alert', { message: 'Bus is 15 minutes late.', school_name: 'Sri Sai Ram' });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.message.named).toEqual({ message: 'Bus is 15 minutes late.', school_name: 'Sri Sai Ram' });
   });
 
-  it('blockedNotice covers transport + staff credentials', () => {
-    expect(blockedNotice('transport.alert').message).toMatch(/bus/i);
-    expect(blockedNotice('staff.credentials').message).toMatch(/REJECTED/);
+  it('rejects a stray media param (the template cannot carry attachments)', () => {
+    const res = resolveTemplateMessage('transport.alert', { message: 'x', school_name: 'y', media_url: 'https://a' });
+    expect(res.ok).toBe(false);
   });
 });
 

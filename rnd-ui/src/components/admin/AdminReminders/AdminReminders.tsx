@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Send, CreditCard, Search, Calendar, Clock, Trash, Plus, X, CheckCircle, 
-  MapPin, MessageSquare, Check, RefreshCw, Mic, FileAudio, Image 
+  MapPin, MessageSquare, Check, RefreshCw
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import type { StudentData, ClassData, TeacherData } from '../../../types';
@@ -13,6 +13,9 @@ import { DataTable, Th, Td, Tr, MobileCardList, MobileRowCard, EmptyState } from
 // options and the SAME backend flow, which sends the approved installment_reminder
 // template (student_name / fee_type / amount). 'all' → total outstanding.
 type FeeCategory = 'school' | 'transport' | 'books' | 'all';
+
+// Mirrors TRANSPORT_MESSAGE_MAX_LENGTH in rnd-service transportAlert.service.
+const TRANSPORT_MESSAGE_MAX_LENGTH = 900;
 const FEE_CATEGORY_OPTIONS: { value: FeeCategory; label: string }[] = [
   { value: 'school', label: 'School / Tuition Fee' },
   { value: 'transport', label: 'Bus Fee' },
@@ -59,18 +62,8 @@ const AdminReminders: React.FC<AdminRemindersProps> = ({
   // --- Transport Reminders Tab States ---
   const [availableClusters, setAvailableClusters] = useState<string[]>([]);
   const [selectedClusters, setSelectedClusters] = useState<string[]>([]);
-  const [transportMessageType, setTransportMessageType] = useState<'bus_coming' | 'custom'>('bus_coming');
-  const [customTransportMessage, setCustomTransportMessage] = useState('');
+  const [transportMessage, setTransportMessage] = useState('');
   const [sendingTransportAlert, setSendingTransportAlert] = useState(false);
-
-  // Attachment & Voice Recording States — supports attaching multiple files per alert
-  interface ReminderAttachment { url: string; type: 'image' | 'video' | 'audio' | 'document'; filename: string; size?: number; }
-  const [attachments, setAttachments] = useState<ReminderAttachment[]>([]);
-  const [isUploadingMedia, setIsUploadingMedia] = useState<boolean>(false);
-  const [isRecording, setIsRecording] = useState<boolean>(false);
-  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
-  const [recordingSeconds, setRecordingSeconds] = useState<number>(0);
-  const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | null>(null);
 
 
   // Fetch Scheduled Reminders
@@ -288,158 +281,20 @@ const AdminReminders: React.FC<AdminRemindersProps> = ({
     }
   };
 
-  const uploadOneFile = async (file: File): Promise<ReminderAttachment> => {
-    const base64 = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(file);
-    });
-
-    let type: 'image' | 'video' | 'audio' | 'document' = 'document';
-    if (file.type.startsWith('image/')) type = 'image';
-    else if (file.type.startsWith('video/')) type = 'video';
-    else if (file.type.startsWith('audio/')) type = 'audio';
-
-    const res = await fetch(`${API_BASE}/messages/upload-media`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${getAccessToken()}`
-      },
-      body: JSON.stringify({ fileBase64: base64, filename: file.name })
-    });
-    const data = await res.json();
-    if (!data.success) throw new Error(data.message || `Failed to upload "${file.name}".`);
-    return { url: data.fileUrl, type, filename: file.name, size: typeof data.size === 'number' ? data.size : file.size };
-  };
-
-  const handleLocalFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files ? Array.from(e.target.files) : [];
-    if (files.length === 0) return;
-    setIsUploadingMedia(true);
-    try {
-      // allSettled (not all) — one bad file shouldn't discard uploads that already
-      // succeeded and are sitting in S3/local storage with nothing referencing them.
-      const results = await Promise.allSettled(files.map(uploadOneFile));
-      const succeeded = results.filter((r): r is PromiseFulfilledResult<ReminderAttachment> => r.status === 'fulfilled').map(r => r.value);
-      const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
-
-      if (succeeded.length > 0) {
-        setAttachments(prev => [...prev, ...succeeded]);
-        showToast(`${succeeded.length} file(s) attached successfully!`, 'success');
-      }
-      if (failed.length > 0) {
-        showToast(failed.map(f => f.reason?.message || 'Upload failed').join(' '), 'error');
-      }
-    } catch (err) {
-      console.error(err);
-      showToast('Error uploading file(s).', 'error');
-    } finally {
-      setIsUploadingMedia(false);
-      e.target.value = '';
-    }
-  };
-
-  const removeAttachment = (index: number) => {
-    setAttachments(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-      // Chrome/Edge only support recording to WebM/Opus; Firefox can record straight to
-      // Ogg/Opus. Ask for whichever the browser actually supports instead of assuming.
-      const preferredMimeTypes = ['audio/ogg;codecs=opus', 'audio/webm;codecs=opus', 'audio/webm'];
-      const supportedMimeType = preferredMimeTypes.find(t => MediaRecorder.isTypeSupported(t));
-      const recorder = supportedMimeType ? new MediaRecorder(stream, { mimeType: supportedMimeType }) : new MediaRecorder(stream);
-      const chunks: Blob[] = [];
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunks.push(e.data);
-      };
-
-      recorder.onstop = async () => {
-        // Use the recorder's actual mimeType — never assume/hardcode a format the
-        // browser didn't really produce, since the backend/WhatsApp both care.
-        const actualMimeType = recorder.mimeType || 'audio/webm';
-        const extension = actualMimeType.includes('ogg') ? 'ogg' : 'webm';
-        const filename = `voice_recording.${extension}`;
-
-        const blob = new Blob(chunks, { type: actualMimeType });
-        const localUrl = URL.createObjectURL(blob);
-        setRecordedAudioUrl(localUrl);
-
-        const reader = new FileReader();
-        reader.onloadend = async () => {
-          const base64 = reader.result as string;
-          try {
-            const res = await fetch(`${API_BASE}/messages/upload-media`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${getAccessToken()}`
-              },
-              body: JSON.stringify({ fileBase64: base64, filename })
-            });
-            const data = await res.json();
-            if (data.success) {
-              setAttachments(prev => [...prev, { url: data.fileUrl, type: 'audio', filename, size: typeof data.size === 'number' ? data.size : undefined }]);
-              showToast('Voice message recorded and uploaded successfully!', 'success');
-            } else {
-              showToast(data.message || 'Voice recording upload failed.', 'error');
-            }
-          } catch {
-            showToast('Failed to upload voice message.', 'error');
-          } finally {
-            setIsUploadingMedia(false);
-          }
-        };
-        reader.readAsDataURL(blob);
-
-        stream.getTracks().forEach(track => track.stop());
-      };
-
-      setMediaRecorder(recorder);
-      setRecordingSeconds(0);
-      setIsRecording(true);
-      recorder.start();
-
-      const interval = setInterval(() => {
-        setRecordingSeconds(s => s + 1);
-      }, 1000);
-      (window as any).recInterval = interval;
-
-    } catch (err) {
-      console.error(err);
-      showToast('Could not access microphone.', 'error');
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorder && isRecording) {
-      // Lock the Send button immediately — the recording still has to be encoded and
-      // uploaded before it's added to the attachments list, and that takes a moment.
-      setIsUploadingMedia(true);
-      mediaRecorder.stop();
-      setIsRecording(false);
-      if ((window as any).recInterval) {
-        clearInterval((window as any).recInterval);
-      }
-    }
-  };
-
+  // Sent via the approved transport_bus_alert template (text only — it has no
+  // media header), so there are no attachments. The template itself supplies
+  // "Dear Parent," and the school name; the admin writes only the message.
   const handleSendTransportAlert = async () => {
     if (selectedClusters.length === 0) {
       showToast('Please select at least one cluster.', 'error');
       return;
     }
+    const message = transportMessage.trim();
+    if (!message) {
+      showToast('Please type the message to send.', 'error');
+      return;
+    }
     setSendingTransportAlert(true);
-
-    const message = transportMessageType === 'bus_coming'
-      ? 'Dear Parent/Teacher, the school bus is approaching your route/cluster area. Please be ready at your designated pickup point. Thank you!'
-      : customTransportMessage;
 
     try {
       const token = getAccessToken();
@@ -449,17 +304,12 @@ const AdminReminders: React.FC<AdminRemindersProps> = ({
       let totalSent = 0;
       let totalFailed = 0;
 
-      // Send to each selected cluster
       for (const cluster of selectedClusters) {
         try {
           const res = await fetch(`${API_BASE}/dashboard/cluster-broadcast`, {
             method: 'POST',
             headers,
-            body: JSON.stringify({
-              cluster,
-              message,
-              media: attachments.length > 0 ? attachments : undefined
-            })
+            body: JSON.stringify({ cluster, message })
           });
           const data = await res.json();
           if (data.success) {
@@ -475,25 +325,24 @@ const AdminReminders: React.FC<AdminRemindersProps> = ({
 
       if (totalSent > 0) {
         showToast(`✅ WhatsApp transport alert sent to ${totalSent} recipients across ${selectedClusters.length} cluster(s).`, 'success');
+        setTransportMessage('');
+        setSelectedClusters([]);
       }
       if (totalFailed > 0) {
         showToast(`⚠️ ${totalFailed} messages failed to send.`, 'error');
       }
-      setSelectedClusters([]);
     } catch (err) {
       console.error(err);
       showToast('Error sending transport alert.', 'error');
     } finally {
       setSendingTransportAlert(false);
-      setAttachments([]);
-      setRecordedAudioUrl(null);
     }
   };
 
-  // Compute stats for selected clusters
+  // Only parents receive transport alerts (the template opens with "Dear Parent,").
   const studentsInSelectedClusters = students.filter(s => s.cluster && selectedClusters.includes(s.cluster));
-  const teachersInSelectedClusters = teachers.filter(t => t.cluster && selectedClusters.includes(t.cluster));
-  const totalTransportRecipients = studentsInSelectedClusters.length + teachersInSelectedClusters.length;
+  const totalTransportRecipients = studentsInSelectedClusters.length;
+  const canSendTransportAlert = selectedClusters.length > 0 && transportMessage.trim().length > 0 && !sendingTransportAlert;
 
   const formatClassName = (cls: string, sec: string) => {
     const classNum = isNaN(Number(cls)) ? cls : `Class ${cls}`;
@@ -945,16 +794,8 @@ const AdminReminders: React.FC<AdminRemindersProps> = ({
                   <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">Selected: {selectedClusters.join(', ')}</div>
                   <div className="flex gap-4 mt-2">
                     <div className="text-center">
-                      <div className="text-lg font-extrabold text-slate-800 dark:text-slate-100">{studentsInSelectedClusters.length}</div>
-                      <div className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold">Parents</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-lg font-extrabold text-slate-800 dark:text-slate-100">{teachersInSelectedClusters.length}</div>
-                      <div className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold">Teachers</div>
-                    </div>
-                    <div className="text-center">
                       <div className="text-lg font-extrabold text-blue-600">{totalTransportRecipients}</div>
-                      <div className="text-[10px] text-blue-400 font-semibold">Total</div>
+                      <div className="text-[10px] text-blue-400 font-semibold">Parents</div>
                     </div>
                   </div>
                 </div>
@@ -972,99 +813,36 @@ const AdminReminders: React.FC<AdminRemindersProps> = ({
               </div>
             </div>
             <div className="p-4 flex flex-col gap-4">
-              {/* Message Type */}
               <div>
-                <div className="text-xs font-bold text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-2">Message Template</div>
-                <div className="flex gap-3">
-                  {(['bus_coming', 'custom'] as const).map(mode => (
-                    <label key={mode} className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer text-[12px] font-semibold transition-all ${
-                      transportMessageType === mode ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-slate-200 text-slate-500'
-                    }`}>
-                      <input type="radio" name="transportMsgType" className="sr-only" checked={transportMessageType === mode} onChange={() => setTransportMessageType(mode)} />
-                      {mode === 'bus_coming' ? 'Preset (Bus approaching)' : 'Custom Message'}
-                    </label>
-                  ))}
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="text-xs font-bold text-slate-600 dark:text-slate-400 dark:text-slate-500">Message</div>
+                  <div className="text-[10px] text-slate-400 dark:text-slate-500">{transportMessage.length}/{TRANSPORT_MESSAGE_MAX_LENGTH}</div>
+                </div>
+                <textarea
+                  className="w-full h-24 p-2.5 border border-slate-200 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-800 resize-none outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 font-[inherit]"
+                  value={transportMessage}
+                  maxLength={TRANSPORT_MESSAGE_MAX_LENGTH}
+                  onChange={(e) => setTransportMessage(e.target.value)}
+                  placeholder="e.g. Today the bus is 15 minutes late on this route. Please wait at your pickup point."
+                />
+                <div className="mt-1.5 text-[11px] text-slate-400 dark:text-slate-500">
+                  Parents receive: "Transport Update — Dear Parent, <em>your message</em> — School: {'{school name}'}". Text only; attachments aren't supported by this WhatsApp template.
                 </div>
               </div>
-
-              {/* Message Content */}
-              <div>
-                <div className="text-xs font-bold text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1.5">WhatsApp Message</div>
-                {transportMessageType === 'bus_coming' ? (
-                  <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-lg text-[13px] text-emerald-800 italic leading-relaxed">
-                    "Dear Parent/Teacher, the school bus is approaching your route. Please be ready at your designated pickup point. Thank you!"
-                  </div>
-                ) : (
-                  <textarea
-                    className="w-full h-24 p-2.5 border border-slate-200 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-800 resize-none outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 font-[inherit]"
-                    value={customTransportMessage}
-                    onChange={(e) => setCustomTransportMessage(e.target.value)}
-                    placeholder="Type custom transport message here..."
-                  />
-                )}
-              </div>
-
-              {/* Media Attachments */}
-              {transportMessageType === 'custom' && (
-                <div className="p-3 border border-dashed border-slate-200 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900">
-                  <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 dark:text-slate-500 mb-2">Attach Voice or Media (WhatsApp compatible)</div>
-                  <div className="flex flex-wrap gap-2">
-                    <label className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-[11px] font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 cursor-pointer hover:bg-slate-50 dark:bg-slate-900 transition-colors">
-                      <Image size={12} className="text-emerald-500" /> Add Photo/Video
-                      <input type="file" accept="image/*,video/*" multiple className="hidden" onChange={handleLocalFileSelect} />
-                    </label>
-                    <label className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-[11px] font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 cursor-pointer hover:bg-slate-50 dark:bg-slate-900 transition-colors">
-                      <FileAudio size={12} className="text-cyan-500" /> Add Audio
-                      <input type="file" accept="audio/*" multiple className="hidden" onChange={handleLocalFileSelect} />
-                    </label>
-                    {!isRecording ? (
-                      <button type="button" onClick={startRecording} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-red-200 bg-red-50 text-[11px] font-bold text-red-500 hover:bg-red-100 transition-colors">
-                        <Mic size={12} /> Record Voice
-                      </button>
-                    ) : (
-                      <button type="button" onClick={stopRecording} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-red-500 text-[11px] font-bold text-white animate-pulse">
-                        <Mic size={12} /> Stop ({recordingSeconds}s)
-                      </button>
-                    )}
-                  </div>
-                  {recordedAudioUrl && (
-                    <audio src={recordedAudioUrl} controls className="w-full h-8 mt-2" />
-                  )}
-                  {isUploadingMedia && (
-                    <div className="mt-2 flex items-center gap-2 text-[11px] text-blue-600">
-                      <RefreshCw size={11} className="animate-spin" /> Uploading attachment...
-                    </div>
-                  )}
-                  {attachments.length > 0 && (
-                    <div className="mt-2 flex flex-col gap-1.5">
-                      {attachments.map((att, idx) => (
-                        <div key={`${att.url}-${idx}`} className="flex items-center justify-between px-2.5 py-1.5 rounded-md bg-sky-50 border border-sky-200">
-                          <div className="flex items-center gap-1.5">
-                            <Check size={12} className="text-sky-600" />
-                            <span className="text-[11px] font-semibold text-sky-700 truncate max-w-[180px]">{att.filename} ({att.type})</span>
-                          </div>
-                          <button type="button" onClick={() => removeAttachment(idx)} className="text-red-500 hover:text-red-700 transition-colors p-0.5" title="Remove">✕</button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
 
               {/* Send Button */}
               <button
                 type="button"
-                disabled={selectedClusters.length === 0 || sendingTransportAlert || isUploadingMedia}
+                disabled={!canSendTransportAlert}
                 onClick={handleSendTransportAlert}
                 className={`w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all ${
-                  selectedClusters.length === 0 || sendingTransportAlert || isUploadingMedia
-                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                    : 'bg-emerald-500 text-white hover:bg-emerald-600'
+                  canSendTransportAlert
+                    ? 'bg-emerald-500 text-white hover:bg-emerald-600'
+                    : 'bg-slate-100 text-slate-400 cursor-not-allowed'
                 }`}
               >
                 {sendingTransportAlert ? (<><RefreshCw size={14} className="animate-spin" /> Broadcasting...</>) :
-                 isUploadingMedia ? (<><RefreshCw size={14} className="animate-spin" /> Uploading...</>) :
-                 (<><Send size={14} /> Send Transport Alert ({totalTransportRecipients} Recipients)</>)}
+                 (<><Send size={14} /> Send Transport Alert ({totalTransportRecipients} Parents)</>)}
               </button>
             </div>
           </div>

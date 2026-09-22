@@ -12,7 +12,7 @@ import { requirePermission } from '../../middlewares/permission.middleware';
 import { audit } from '../../middlewares/audit.middleware';
 import { getS3Client, getPresignedDownloadUrl } from '../../services/s3.service';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
-import { blockedNotice } from '../../config/whatsappTemplates';
+import { dispatchTransportAlert, sanitizeTransportMessage, TRANSPORT_MESSAGE_MAX_LENGTH } from '../../services/transportAlert.service';
 import { runInstallmentReminderSweep } from '../../services/scheduler';
 import { ScheduledAlert } from '../../models/scheduledAlert.model';
 import { queueTemplateNotification } from '../../config/queue';
@@ -977,47 +977,35 @@ router.get('/fee-analytics', requirePermission('fees:view'), cacheResponse(300),
   }
 });
 
-// Broadcast WhatsApp message to all students in a cluster (e.g., Madhapur).
-// Sends to all applicable WhatsApp numbers: father, mother, and student.
+// Transport alert to every parent in a cluster (e.g. Madhapur), via the
+// approved transport_bus_alert template — text only, no media.
 router.post('/cluster-broadcast', requirePermission('whatsapp:send'), async (req: Request, res: Response) => {
   try {
-    const { cluster, message } = req.body;
+    const cluster = String(req.body.cluster ?? '').trim();
+    const message = sanitizeTransportMessage(req.body.message);
 
-    if (!cluster || !cluster.trim()) {
+    if (!cluster) {
       return res.status(400).json({ success: false, message: 'cluster is required.' });
     }
-    if (!message || !message.trim()) {
+    if (!message) {
       return res.status(400).json({ success: false, message: 'message is required.' });
     }
+    if (message.length > TRANSPORT_MESSAGE_MAX_LENGTH) {
+      return res.status(400).json({
+        success: false,
+        message: `Message is too long (${message.length}/${TRANSPORT_MESSAGE_MAX_LENGTH} characters).`
+      });
+    }
 
-    const clusterNormalized = cluster.trim();
-    let students: any[] = [];
-
-    students = await Student.find({ cluster: { $regex: `^${clusterNormalized}$`, $options: 'i' } });
-
-    if (students.length === 0) {
+    const result = await dispatchTransportAlert(cluster, message);
+    if (result.studentsInCluster === 0) {
       return res.status(404).json({ success: false, message: `No students found in cluster "${cluster}".` });
     }
 
-    // Collect all unique WhatsApp numbers from students, fathers, mothers
-    const phoneSet = new Set<string>();
-    for (const student of students) {
-      if ((student as any).whatsappNo) phoneSet.add((student as any).whatsappNo);
-      if ((student as any).fatherWhatsappNo) phoneSet.add((student as any).fatherWhatsappNo);
-      if ((student as any).motherWhatsappNo) phoneSet.add((student as any).motherWhatsappNo);
-    }
-
-    const phones = Array.from(phoneSet).filter(Boolean);
-
-    // Transport / "bus is coming" cluster alert is a PROACTIVE notification with
-    // no approved Meta template. Proactive free-form WhatsApp is disabled — do
-    // NOT send and do NOT report success.
-    console.warn(
-      `[BLOCKED] /cluster-broadcast: transport alert for cluster "${cluster}" (${phones.length} number(s)) NOT sent — no approved WhatsApp template.`
-    );
-    return res.status(422).json({
-      ...blockedNotice('transport.alert'),
-      details: { cluster, studentsInCluster: students.length, uniquePhoneNumbers: phones.length }
+    return res.status(200).json({
+      success: true,
+      message: `Transport alert queued for ${result.messagesSent} recipient(s).`,
+      details: { cluster, ...result }
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });
