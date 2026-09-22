@@ -9,9 +9,8 @@ import cookieParser from 'cookie-parser';
 import compression from 'compression';
 import passport from 'passport';
 import path from 'path';
-import rateLimit from 'express-rate-limit';
-import RedisStore from 'rate-limit-redis';
 import redisClient from './config/redis';
+import { createLoginRateLimiter } from './middlewares/loginRateLimit.middleware';
 import { connectDB } from './config/db';
 import mongoose from 'mongoose';
 import { setupTemplate as setupWhatsAppTemplate } from './scripts/setupWhatsAppTemplate';
@@ -113,22 +112,8 @@ app.use(
 app.use(passport.initialize());
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
-// Rate limiting for login endpoint (HTTP-level brute force defense backed by Redis)
-const loginRateLimiter = rateLimit({
-  store: new RedisStore({
-    sendCommand: async (...args: string[]) => {
-      return redisClient.call(args[0], ...args.slice(1)) as Promise<any>;
-    },
-  }),
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 20, // Max 20 login attempts per window per IP
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { success: false, message: 'Too many login attempts. Please try again after 15 minutes.' }
-});
-
 // API Auth Route (Public)
-app.use('/api/auth/login', loginRateLimiter);
+app.use('/api/auth/login', createLoginRateLimiter(redisClient));
 app.use('/api/auth', sharedAuthRoutes);
 app.use('/api/receipts', sharedReceiptRoutes);
 app.use('/api/whatsapp', whatsappWebhookRoutes);

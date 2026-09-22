@@ -25,12 +25,42 @@ echo ===================================================
 echo   Starting School ERP and WhatsApp Services
 echo ===================================================
 
-:: 1. Start Redis Server
-echo [1/5] Starting Redis Server in a new window...
-start "Redis Server" /D "%~dp0" cmd /k ".\redis_win\redis-server.exe .\redis_win\redis.windows.conf"
-
-:: Wait 2 seconds for Redis to initialize
-timeout /t 2 /nobreak >nul
+:: 1. Start Redis (login throttling, caching, BullMQ worker).
+:: redis_win\ is gitignored, so a fresh clone doesn't have it -- this step used
+:: to fail silently on every run. Use it if present, else fall back to Docker.
+echo [1/5] Starting Redis...
+netstat -ano | findstr /R /C:":6379 .*LISTENING" >nul && (
+  echo       Redis is already running on port 6379.
+  goto redis_done
+)
+if exist "%~dp0redis_win\redis-server.exe" (
+  start "Redis Server" /D "%~dp0" cmd /k ".\redis_win\redis-server.exe .\redis_win\redis.windows.conf"
+  timeout /t 2 /nobreak >nul
+  echo       Redis started from redis_win.
+  goto redis_done
+)
+where docker >nul 2>&1 || goto redis_missing
+docker info >nul 2>&1 && goto docker_ready
+echo       Docker Desktop is not running -- starting it (can take up to ~90s)...
+if exist "%ProgramFiles%\Docker\Docker\Docker Desktop.exe" start "" "%ProgramFiles%\Docker\Docker\Docker Desktop.exe"
+set /a DOCKER_WAIT=0
+:wait_docker
+docker info >nul 2>&1 && goto docker_ready
+set /a DOCKER_WAIT+=1
+if %DOCKER_WAIT% GEQ 45 goto redis_missing
+:: ping, not timeout: timeout exits instantly without a console, which would
+:: burn through the retries before Docker has had time to start.
+ping -n 3 127.0.0.1 >nul
+goto wait_docker
+:docker_ready
+docker start school-erp-redis >nul 2>&1 || docker run -d --name school-erp-redis -p 6379:6379 redis:alpine >nul
+echo       Redis started in Docker (container: school-erp-redis).
+goto redis_done
+:redis_missing
+echo       WARNING: Could not start Redis (no redis_win\ folder and Docker unavailable).
+echo       The app still works -- login falls back to in-memory rate limiting --
+echo       but caching is off and background jobs run inline.
+:redis_done
 
 :: 2. Start Ngrok Tunnel
 echo [2/5] Starting Ngrok Tunnel in a new window...
