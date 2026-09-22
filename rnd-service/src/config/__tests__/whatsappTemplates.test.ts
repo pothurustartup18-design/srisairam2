@@ -215,6 +215,14 @@ describe('announcement + event templates (MARKETING, text-only)', () => {
     expect(def.header).toBeUndefined();
   });
 
+  it('event.announcement_media → event_announcement_media / en / params include media_url, no header', () => {
+    const def = getRegisteredTemplate('event.announcement_media')!;
+    expect(def.metaName).toBe('event_announcement_media');
+    expect(def.parameters).toEqual(['event_title', 'event_date', 'event_description', 'media_url']);
+    // No HEADER component on this template — media_url is a plain BODY param.
+    expect(def.header).toBeUndefined();
+  });
+
   it('resolves announcement.broadcast with { custom }', () => {
     const res = resolveTemplateMessage('announcement.broadcast', { custom: 'School closed tomorrow.' });
     expect(res.ok).toBe(true);
@@ -240,10 +248,50 @@ describe('announcement + event templates (MARKETING, text-only)', () => {
     if (res.ok) return;
     expect(res.error).toMatch(/unexpected parameter\(s\): title/);
   });
+
+  it('resolves event.announcement_media with the 4 params, media_url included verbatim', () => {
+    const res = resolveTemplateMessage('event.announcement_media', {
+      event_title: 'Annual Convocation 2026',
+      event_date: '22 September 2026',
+      event_description: 'Graduation ceremony highlights.',
+      media_url: 'http://18-61-239-173.sslip.io/api/events/6aafb3ef978b7753b209fbbc/media'
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.message.metaName).toBe('event_announcement_media');
+    expect(res.message.named.media_url).toBe('http://18-61-239-173.sslip.io/api/events/6aafb3ef978b7753b209fbbc/media');
+    expect(res.message.header).toBeUndefined();
+  });
+
+  it('rejects event.announcement_media missing media_url', () => {
+    const res = resolveTemplateMessage('event.announcement_media', {
+      event_title: 'x', event_date: 'y', event_description: 'z'
+    });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toMatch(/missing required parameter\(s\): media_url/);
+  });
+
+  it('event.announcement_media params never contain a newline (Meta rejects embedded newlines in BODY params with code 132018)', () => {
+    // Regression guard for the exact bug this template replaced: concatenating
+    // the gallery link into event_description with `\n\n` caused Meta to
+    // reject every send. media_url must always be passed as its own param.
+    const res = resolveTemplateMessage('event.announcement_media', {
+      event_title: 'Annual Convocation 2026',
+      event_date: '22 September 2026',
+      event_description: 'Graduation ceremony highlights.',
+      media_url: 'http://18-61-239-173.sslip.io/api/events/6aafb3ef978b7753b209fbbc/media'
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    for (const value of Object.values(res.message.named)) {
+      expect(value).not.toMatch(/\n/);
+    }
+  });
 });
 
 describe('registry completeness — every active production template is registered', () => {
-  it('has exactly the 10 expected keys → exact Meta names', () => {
+  it('has exactly the 11 expected keys → exact Meta names', () => {
     const expected: Record<string, string> = {
       'attendance.full': 'attendance_alert_full',
       'attendance.morning': 'attendance_alert_morning',
@@ -257,7 +305,8 @@ describe('registry completeness — every active production template is register
       'installment.reminder': 'installment_reminder',
       'installment.overdue': 'installment_overdue',
       'announcement.broadcast': 'announcement_broadcast',
-      'event.announcement': 'event_announcement'
+      'event.announcement': 'event_announcement',
+      'event.announcement_media': 'event_announcement_media'
     };
     expect(Object.keys(WHATSAPP_TEMPLATES).sort()).toEqual(Object.keys(expected).sort());
     for (const [k, meta] of Object.entries(expected)) {

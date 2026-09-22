@@ -6,22 +6,43 @@ import { executeAlertBroadcast, BroadcastFilters, BroadcastTemplate, formatTempl
 
 /**
  * Approved-template descriptor for an event/notice alert.
- *  - a "notice" (type !== 'event')  → announcement_broadcast, param: custom
- *  - an "event"                     → event_announcement, params: event_title / _date / _description
+ *  - a "notice" (type !== 'event')                → announcement_broadcast, param: custom
+ *  - an "event" with no attachments                → event_announcement, params: event_title / _date / _description
+ *  - an "event" WITH attachments                    → event_announcement_media, same three params
+ *    plus media_url (the permanent gallery link, a clean single-line URL).
+ *    event_description is always the admin's raw text, verbatim — never
+ *    concatenate the link into it. That was tried once and Meta rejected
+ *    every send with HTTP 400 / code 132018 ("issue with the parameters"):
+ *    the approved template's BODY params reject embedded newlines, and the
+ *    link was being appended as `${description}\n\n...${link}`. There is no
+ *    equivalent media template for notices — see MISSING_TEMPLATES.
  */
 function buildAlertTemplate(opts: {
   type?: string;
   title: string;
   description?: string;
   date?: string | Date;
+  mediaUrl?: string | null;
 }): BroadcastTemplate {
   const desc = (opts.description || '').trim();
   if (opts.type === 'event') {
+    const eventDate = opts.date ? formatTemplateDate(opts.date) : formatTemplateDate(new Date());
+    if (opts.mediaUrl) {
+      return {
+        key: 'event.announcement_media',
+        params: {
+          event_title: opts.title,
+          event_date: eventDate,
+          event_description: desc || opts.title,
+          media_url: opts.mediaUrl
+        }
+      };
+    }
     return {
       key: 'event.announcement',
       params: {
         event_title: opts.title,
-        event_date: opts.date ? formatTemplateDate(opts.date) : formatTemplateDate(new Date()),
+        event_date: eventDate,
         event_description: desc || opts.title
       }
     };
@@ -33,6 +54,7 @@ import { audit } from '../../middlewares/audit.middleware';
 import { getS3Client, getPresignedDownloadUrl, getMediaType } from '../../services/s3.service';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { IEventAttachment } from '../../models/event.model';
+import { getPublicOrigin } from '../../utils/publicOrigin';
 
 const router = Router();
 
@@ -128,26 +150,24 @@ router.post('/', requirePermission('events:manage'), async (req: Request, res: R
 
     // Handle publishing alerts if specified
     if (sendAlertsTo && sendAlertsTo !== 'none') {
-      // The approved templates are text-only (no media header) — the only way
-      // a parent can reach the photos/videos is a link in the body. Rather
-      // than trust an admin to paste a raw (7-day, expiring) presigned URL
-      // into the description, append the PERMANENT gallery link here,
-      // server-side, using the real saved event's _id: GET
+      // The plain templates are text-only (no media header) — for an EVENT
+      // with attachments, event_announcement_media carries the PERMANENT
+      // gallery link in its own dedicated media_url param (GET
       // /api/events/:eventId/media mints a fresh presigned URL for every
-      // attachment on each visit, so the link itself never expires.
-      const appHost = process.env.APP_HOST || 'localhost:5173';
-      const galleryLink = attachments.length > 0 ? `http://${appHost}/api/events/${createdEvent._id}/media` : null;
-      const descriptionForAlert = galleryLink
-        ? `${description || ''}${description ? '\n\n' : ''}📎 View photos & attachments: ${galleryLink}`
-        : description;
+      // attachment on each visit, so the link itself never expires). Pass it
+      // as a clean, single-line param — never concatenate it into
+      // event_description (Meta rejects embedded newlines in a BODY param
+      // with HTTP 400 / code 132018; see buildAlertTemplate's comment).
+      const galleryLink =
+        type === 'event' && attachments.length > 0 ? `${getPublicOrigin(req)}/api/events/${createdEvent._id}/media` : null;
 
       // `alertMsg` is kept only for the ScheduledAlert / ERP history record —
       // actual WhatsApp delivery uses the approved template below.
-      const alertMsg = `SchoolHub Event: "${title}" is scheduled on ${new Date(date).toLocaleDateString()}. Description: ${descriptionForAlert || ''}`;
+      const alertMsg = `SchoolHub Event: "${title}" is scheduled on ${new Date(date).toLocaleDateString()}. Description: ${description || ''}`;
       const mediaList: string[] = Array.isArray(media) ? media : (media ? [media] : []);
       const audience = sendAlertsTo as 'parents' | 'teachers' | 'both';
       const filters = { classes: classes || [], sections: sections || [] };
-      const alertTemplate = buildAlertTemplate({ type, title, description: descriptionForAlert, date });
+      const alertTemplate = buildAlertTemplate({ type, title, description, date, mediaUrl: galleryLink });
 
       if (scheduledAlertTime) {
         // --- SCHEDULED ALERT ---

@@ -39,6 +39,17 @@
  *       body params: custom
  *   event_announcement           en  APPROVED  MARKETING  NAMED  BODY only
  *       body params: event_title, event_date, event_description
+ *   event_announcement_media     en  APPROVED  MARKETING  NAMED  BODY only
+ *       Verified against Meta 2026-09-20. Same body as event_announcement plus
+ *       one extra param: body params: event_title, event_date, event_description,
+ *       media_url. NOTE media_url is a plain BODY text param (no HEADER
+ *       component on this template) — it must be a clean single-line URL with
+ *       NO embedded newlines/control characters, or Meta rejects the whole
+ *       send with HTTP 400 / code 132018 ("issue with the parameters"). Used
+ *       instead of event_announcement whenever the event has attachments, with
+ *       media_url = the permanent gallery link (GET /api/events/:eventId/media).
+ *       event_description must stay the admin's raw text here — do NOT
+ *       concatenate the link into it (that's what caused the 132018s above).
  *
  * Every approved body text already contains BOTH the English and Telugu
  * sentences (where bilingual), so ONE template send covers both languages
@@ -173,6 +184,14 @@ export const WHATSAPP_TEMPLATES = {
     language: 'en',
     category: 'announcements',
     parameters: ['event_title', 'event_date', 'event_description']
+  },
+  'event.announcement_media': {
+    metaName: 'event_announcement_media',
+    language: 'en',
+    category: 'announcements',
+    // media_url is a plain BODY param (this template has no HEADER
+    // component) — must be a clean single-line URL, no newlines.
+    parameters: ['event_title', 'event_date', 'event_description', 'media_url']
   }
 } as const satisfies Record<string, RegisteredTemplate>;
 
