@@ -7,7 +7,6 @@ import { RefreshToken } from '../models/refreshToken.model';
 import { Teacher } from '../models/teacher.model';
 import { Student } from '../models/student.model';
 import { PasswordResetOTP } from '../models/passwordResetOTP.model';
-import { ProfileUpdateOTP } from '../models/profileUpdateOTP.model';
 import { getEffectivePermissions } from '../services/permissionEngine';
 import { ALL_PERMISSIONS } from '../config/permissions';
 import { queueTemplateNotification } from '../config/queue';
@@ -548,13 +547,10 @@ export const resetPassword = async (req: Request, res: Response) => {
 };
 
 // 7. CHANGE PASSWORD CONTROLLER (Authenticated)
-// Teachers additionally require a WhatsApp OTP (sent via
-// POST /api/teachers/me/send-password-otp) as a second verification factor;
-// other roles (admin/parent) are unaffected and keep the original current-
-// password-only flow.
+// Same current-password-only flow for every role.
 export const changePassword = async (req: Request, res: Response) => {
   try {
-    const { currentPassword, newPassword, otpCode } = req.body;
+    const { currentPassword, newPassword } = req.body;
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ success: false, message: 'Current password and new password are required.' });
     }
@@ -579,23 +575,6 @@ export const changePassword = async (req: Request, res: Response) => {
     const isMatch = await dbUser.comparePassword(currentPassword);
     if (!isMatch) {
       return res.status(400).json({ success: false, message: 'Incorrect current password.' });
-    }
-
-    if (dbUser.role === 'teacher') {
-      if (!otpCode) {
-        return res.status(400).json({ success: false, message: 'WhatsApp security OTP is required to change your password.' });
-      }
-      const otpPhone = dbUser.phone;
-      const hashedOTP = crypto.createHash('sha256').update(String(otpCode).trim()).digest('hex');
-      const otpDoc = await ProfileUpdateOTP.findOne({ userId: dbUser._id, phone: otpPhone, otp: hashedOTP });
-      if (!otpDoc) {
-        return res.status(400).json({ success: false, message: 'Invalid or expired WhatsApp security OTP. Please request a new code.' });
-      }
-      if (otpDoc.expiresAt < new Date()) {
-        await otpDoc.deleteOne().catch(() => {});
-        return res.status(400).json({ success: false, message: 'Security OTP has expired. Please request a new code.' });
-      }
-      await otpDoc.deleteOne().catch(() => {});
     }
 
     dbUser.password = newPassword;

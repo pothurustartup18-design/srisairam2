@@ -59,8 +59,11 @@
  *       security, do not share this code." with a single positional param
  *       (the code) plus a "Copy code" OTP button. Authentication templates
  *       never take NAMED params and always carry the code again in a BUTTON
- *       component (Cloud API: button sub_type "copy_code", parameter type
- *       "coupon_code") — see `parameterFormat`/`otpButton` below.
+ *       component — Cloud API: button sub_type "url", parameter type "text"
+ *       (NOT sub_type "copy_code"/"coupon_code" — that pair is for a
+ *       different feature, the Limited-Time-Offer MARKETING coupon button,
+ *       and produced live Meta error 132018 when tried here on 2026-09-29)
+ *       — see `parameterFormat`/`otpButton` below.
  *   staff_credentials_new        en  APPROVED  (category not yet confirmed —
  *       treated as UTILITY here for billing only; verify in WhatsApp Manager)
  *       Verified via WhatsApp Manager UI on 2026-09-29. NAMED, no header.
@@ -111,8 +114,9 @@ export interface RegisteredTemplate {
   /**
    * Set for AUTHENTICATION templates with a "Copy code" / one-tap-autofill
    * button. The Cloud API requires the OTP value a second time in a dedicated
-   * BUTTON component (sub_type "copy_code") alongside the BODY parameter.
-   * Only meaningful when there is exactly one body parameter (the code).
+   * BUTTON component (sub_type "url", parameter type "text") alongside the
+   * BODY parameter. Only meaningful when there is exactly one body parameter
+   * (the code).
    */
   otpButton?: boolean;
 }

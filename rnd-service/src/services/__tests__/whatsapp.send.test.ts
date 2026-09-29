@@ -214,12 +214,14 @@ describe('sendWhatsAppTemplate', () => {
       type: 'body',
       parameters: [{ type: 'text', text: '482913' }]
     });
-    // BUTTON: copy-code, carries the same code as a coupon_code param
+    // BUTTON: Meta's AUTHENTICATION "Copy Code" button is a url-subtype button
+    // carrying the code as a plain text param (NOT copy_code/coupon_code —
+    // that pair is for Limited-Time-Offer MARKETING templates, a different feature).
     expect(body.template.components[1]).toEqual({
       type: 'button',
-      sub_type: 'copy_code',
+      sub_type: 'url',
       index: '0',
-      parameters: [{ type: 'coupon_code', coupon_code: '482913' }]
+      parameters: [{ type: 'text', text: '482913' }]
     });
   });
 

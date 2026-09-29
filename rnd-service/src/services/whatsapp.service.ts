@@ -50,8 +50,11 @@ export interface SendOptions {
   templateHeader?: TemplateHeaderMedia;
   /**
    * Set for AUTHENTICATION templates with a "Copy code" button (e.g. `o_auth`).
-   * Appends a BUTTON component (sub_type "copy_code") carrying this same value,
-   * as Meta's Cloud API requires alongside the BODY parameter.
+   * Appends a BUTTON component (sub_type "url", parameter type "text") carrying
+   * this same value, as Meta's Cloud API requires alongside the BODY parameter.
+   * NOT sub_type "copy_code"/"coupon_code" — that pair is for a different
+   * feature (Limited-Time-Offer MARKETING templates' coupon button) and
+   * produces Meta error 132018 ("issue with the parameters") if used here.
    */
   otpButtonCode?: string;
 }
@@ -644,13 +647,19 @@ export async function sendWhatsAppTemplate(
     const headerComponents = options?.templateHeader
       ? [buildTemplateHeaderComponent(options.templateHeader)]
       : [];
+    // Meta's AUTHENTICATION "Copy Code" button is, under the Cloud API, a
+    // `url`-subtype button carrying the code as a plain `text` parameter — NOT
+    // `sub_type: 'copy_code'` / `coupon_code` (that pair is for Limited-Time-Offer
+    // MARKETING templates' coupon button, a different feature entirely). Using
+    // the marketing shape here produced Meta error 132018 ("issue with the
+    // parameters") on every send — confirmed live against the o_auth template.
     const buttonComponents = options?.otpButtonCode
       ? [
           {
             type: 'button',
-            sub_type: 'copy_code',
+            sub_type: 'url',
             index: '0',
-            parameters: [{ type: 'coupon_code', coupon_code: options.otpButtonCode }]
+            parameters: [{ type: 'text', text: options.otpButtonCode }]
           }
         ]
       : [];

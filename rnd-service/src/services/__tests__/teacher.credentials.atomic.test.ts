@@ -239,7 +239,7 @@ describe('createTeacher — atomicity (Tests 1, 2, 7)', () => {
 });
 
 describe('resetTeacherPassword — atomicity (Tests 5, 6)', () => {
-  const fakeTeacher = { _id: 'teacher-1', userId: 'user-1', phone: '9876543210' };
+  const fakeTeacher = { _id: 'teacher-1', userId: 'user-1', phone: '9876543210', employeeId: 'EMP-042' };
   const fakeUser = { _id: 'user-1', username: 'emp-100', phone: '9876543210', password: 'OLD_HASH', save: vi.fn() };
 
   beforeEach(() => {
@@ -259,9 +259,24 @@ describe('resetTeacherPassword — atomicity (Tests 5, 6)', () => {
     expect(fakeUser.password).not.toBe('OLD_HASH');
     expect(h.sendTemplateNotificationSync).toHaveBeenCalledWith(
       'staff.credentials_reset',
-      expect.objectContaining({ to: '9876543210' }),
+      expect.objectContaining({
+        to: '9876543210',
+        // The recipient's employee ID, not their (possibly email-based) username.
+        params: expect.objectContaining({ username_en: 'EMP-042', username_te: 'EMP-042' })
+      }),
       { requireLiveSend: true }
     );
+  });
+
+  it('sends the employee ID as the username, not user.username, when the teacher has an email-based login', async () => {
+    h.sendTemplateNotificationSync.mockResolvedValue({ success: true });
+    h.userFindById.mockResolvedValue({ ...fakeUser, username: 'priya.sharma@school.edu' });
+
+    await resetTeacherPassword('teacher-1');
+
+    const [, data] = h.sendTemplateNotificationSync.mock.calls[0];
+    expect(data.params.username_en).toBe('EMP-042');
+    expect(data.params.username_en).not.toBe('priya.sharma@school.edu');
   });
 
   it('retries the password save on a transient failure and still reports success', async () => {

@@ -421,14 +421,18 @@ export async function resetTeacherPassword(teacherId: string): Promise<{ passwor
   // staff_credentials_reset — otherwise a WhatsApp failure would leave the
   // account with a new password nobody received.
   const tempPassword = crypto.randomBytes(4).toString('hex');
+  // The teacher's login identity is best communicated as their employee ID —
+  // `user.username` may instead be an email address when one was supplied at
+  // creation, which isn't what admins/teachers think of as their "username".
+  const displayUsername = teacher.employeeId || user.username;
   const sendResult = await sendTemplateNotificationSync(
     'staff.credentials_reset',
     {
       to: targetPhone,
       params: {
-        username_en: user.username,
+        username_en: displayUsername,
         password_en: tempPassword,
-        username_te: user.username,
+        username_te: displayUsername,
         password_te: tempPassword
       },
       dedupeKey: `staff-credentials-reset:${user._id}:${Date.now()}`
