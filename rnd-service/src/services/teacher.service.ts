@@ -89,21 +89,15 @@ export async function createTeacher(body: any) {
     finalEmpId = await getNextEmployeeId();
   }
 
-  let finalUsername = '';
-  let emailNormalized = '';
-  if (email) {
-    emailNormalized = email.toLowerCase().trim();
-    const existingUserByEmail = await User.findOne({ email: emailNormalized });
-    if (existingUserByEmail) {
-      throw new ServiceError(400, `A user with email ${email} already exists.`);
-    }
-    finalUsername = emailNormalized;
-  } else {
-    finalUsername = finalEmpId.toLowerCase().trim();
-  }
+  // Username is always the employee ID — never the email. Multiple staff are
+  // allowed to share the same contact email (and the same phone number, see
+  // below), so email can never be used as a unique login identifier.
+  const emailNormalized = email ? email.toLowerCase().trim() : '';
+  const finalUsername = finalEmpId.toLowerCase().trim();
 
-  // Phone numbers are intentionally not required to be unique across accounts — a
-  // school may have several staff sharing one front-desk or notification number.
+  // Phone numbers and email addresses are intentionally not required to be
+  // unique across accounts — a school may have several staff sharing one
+  // front-desk/notification phone number or a shared contact email.
 
   const existingTeacherById = await Teacher.findOne({ employeeId: finalEmpId });
   if (existingTeacherById) {
@@ -306,20 +300,14 @@ export async function updateTeacher(teacherId: string, body: any) {
   if (teacher.userId) {
     const user = await User.findById(teacher.userId);
     if (user) {
+      // Email is a shared contact field, not a unique login identifier —
+      // multiple staff may use the same email, so no uniqueness check here.
+      // Username always tracks the employee ID instead (see createTeacher),
+      // never the email, so it's unaffected by email changes.
       if (email !== undefined) {
-        const emailNormalized = email ? email.toLowerCase().trim() : '';
-        if (emailNormalized) {
-          if (emailNormalized !== user.email) {
-            const existingUser = await User.findOne({ email: emailNormalized, _id: { $ne: user._id } });
-            if (existingUser) throw new ServiceError(400, `Email ${email} is already in use by another account.`);
-            user.email = emailNormalized;
-            user.username = emailNormalized;
-          }
-        } else {
-          user.email = undefined;
-          user.username = (employeeId || teacher.employeeId).toLowerCase().trim();
-        }
-      } else if (employeeId && employeeId !== teacher.employeeId && !user.email) {
+        user.email = email ? email.toLowerCase().trim() : undefined;
+      }
+      if (employeeId && employeeId !== teacher.employeeId) {
         user.username = employeeId.toLowerCase().trim();
       }
 

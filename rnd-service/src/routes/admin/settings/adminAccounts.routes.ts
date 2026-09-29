@@ -59,17 +59,11 @@ router.post('/create-admin', requireRole(['admin']), requirePermission('settings
       return res.status(400).json({ success: false, message: 'Phone number has not been verified. Please send and confirm OTP first.' });
     }
 
-    if (newAdminEmail) {
-      const existingUserByEmail = await User.findOne({ email: newAdminEmail.trim().toLowerCase() });
-      if (existingUserByEmail) {
-        return res.status(400).json({ success: false, message: 'Email address is already in use.' });
-      }
-    }
-
-    // Phone numbers are intentionally not required to be unique across employees —
-    // a school may have several admin/teacher accounts sharing one front-desk or
-    // WhatsApp-notification number. Each account is still distinguished by its own
-    // unique employeeId/username.
+    // Phone numbers and email addresses are intentionally not required to be
+    // unique across employees — a school may have several admin/teacher
+    // accounts sharing one front-desk/notification phone number or a shared
+    // contact email. Each account is still distinguished by its own unique
+    // employeeId/username.
 
     // 2. Resolve/Auto-generate unique employeeId
     let finalEmpId = employeeId ? employeeId.trim().toUpperCase() : undefined;
@@ -329,11 +323,8 @@ router.put('/employees/:id', requireRole(['admin']), requirePermission('settings
       return res.status(404).json({ success: false, message: 'Employee user not found.' });
     }
 
-    // Check unique email and phone
-    if (email) {
-      const existingEmail = await User.findOne({ email: email.trim().toLowerCase(), _id: { $ne: user._id } });
-      if (existingEmail) return res.status(400).json({ success: false, message: 'Email address is already in use.' });
-    }
+    // Email is a shared contact field, not a unique login identifier — no
+    // uniqueness check. employeeId (and therefore username) still must be unique.
     if (employeeId) {
       const cleanId = employeeId.trim().toUpperCase();
       const existingEmpId = await User.findOne({ employeeId: cleanId, _id: { $ne: user._id } });

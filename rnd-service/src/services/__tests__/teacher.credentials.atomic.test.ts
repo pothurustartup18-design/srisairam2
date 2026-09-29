@@ -161,13 +161,13 @@ describe('createTeacher — atomicity (Tests 1, 2, 7)', () => {
     expect(TeacherMock).not.toHaveBeenCalled();
   });
 
-  it('Test 7b: a duplicate email is rejected BEFORE any WhatsApp send or User creation', async () => {
-    h.userFindOne.mockResolvedValue({ _id: 'existing-user' }); // duplicate email
+  it('allows a duplicate email across employees — email is a shared contact field, not a unique login identifier', async () => {
+    const { credentials } = await createTeacher({ ...NEW_TEACHER, email: 'shared-office@school.test' });
 
-    await expect(createTeacher({ ...NEW_TEACHER, email: 'asha@school.test' })).rejects.toMatchObject({ status: 400 });
-
-    expect(h.sendTemplateNotificationSync).not.toHaveBeenCalled();
-    expect(UserMock).not.toHaveBeenCalled();
+    // Username always comes from the employee ID, never the email, precisely
+    // so two employees CAN share the same contact email without colliding.
+    expect(credentials.username).toBe('emp-100');
+    expect(h.sendTemplateNotificationSync).toHaveBeenCalled();
   });
 
   it('an unverified phone is rejected before any WhatsApp send or User creation', async () => {

@@ -40,9 +40,9 @@ const UserSchema = new Schema<IUser>(
       trim: true
     },
     email: {
+      // Intentionally NOT unique — a school may have multiple staff sharing
+      // one contact email, same as phone numbers below.
       type: String,
-      unique: true,
-      sparse: true,
       lowercase: true,
       trim: true
     },
