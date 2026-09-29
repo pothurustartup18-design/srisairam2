@@ -1,4 +1,4 @@
-import { S3Client, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand, HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 export type WhatsAppMediaType = 'image' | 'video' | 'audio' | 'document';
@@ -41,6 +41,26 @@ export async function getPresignedDownloadUrl(
   expiresIn: number = PRESIGN_EXPIRY_7_DAYS
 ): Promise<string> {
   const command = new GetObjectCommand({
+    Bucket: process.env.AWS_BUCKET_NAME,
+    Key: s3Key,
+  });
+  return getSignedUrl(getS3Client(), command, { expiresIn });
+}
+
+/**
+ * Presigned PUT URL for a browser to upload a file straight to S3, bypassing
+ * this server entirely. Deliberately does NOT include ContentType in the
+ * signed command: doing so adds `content-type` to the URL's SignedHeaders,
+ * which then requires the browser's actual PUT to send back that EXACT
+ * header value or S3 rejects it with SignatureDoesNotMatch. Leaving it
+ * unsigned lets the browser send whatever Content-Type it wants (S3 stores
+ * whatever header actually arrives) with no coupling to what was presigned.
+ */
+export async function getPresignedUploadUrl(
+  s3Key: string,
+  expiresIn: number = PRESIGN_EXPIRY_2_HOURS
+): Promise<string> {
+  const command = new PutObjectCommand({
     Bucket: process.env.AWS_BUCKET_NAME,
     Key: s3Key,
   });

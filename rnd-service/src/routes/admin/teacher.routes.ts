@@ -4,7 +4,7 @@ import { requirePermission } from '../../middlewares/permission.middleware';
 import { audit } from '../../middlewares/audit.middleware';
 import { ServiceError } from '../../utils/responseHelpers';
 import { ProfileUpdateOTP } from '../../models/profileUpdateOTP.model';
-import { sendWhatsAppText } from '../../services/whatsapp.service';
+import { queueTemplateNotification } from '../../config/queue';
 import {
   createTeacher,
   previewNextEmployeeId,
@@ -32,7 +32,7 @@ const router = Router();
 // both match the exact shapes the original single-file routes returned.
 function handleErrorField(res: Response, error: any) {
   if (error instanceof ServiceError) {
-    return res.status(error.status).json({ success: false, message: error.message });
+    return res.status(error.status).json({ success: false, message: error.message, ...(error.details || {}) });
   }
   return res.status(500).json({ success: false, error: error.message });
 }
@@ -48,7 +48,14 @@ function handleMessageField(res: Response, error: any, fallbackStatus = 500) {
 router.post('/', requirePermission('teachers:create'), async (req: Request, res: Response) => {
   try {
     const { teacher, credentials } = await createTeacher(req.body);
-    return res.status(201).json({ success: true, data: teacher, credentials });
+    return res.status(201).json({
+      success: true,
+      userCreated: true,
+      whatsappSent: true,
+      message: 'Account created successfully. Credentials were sent to the registered WhatsApp number.',
+      data: teacher,
+      credentials
+    });
   } catch (error: any) {
     return handleErrorField(res, error);
   }
@@ -149,13 +156,17 @@ router.post('/me/send-password-otp', async (req: Request, res: Response) => {
       console.log(`\n[DEV] Password Change OTP for Teacher user ${userId} (${targetPhone}): ${otpCode}\n`);
     }
 
-    const message = `🔐 SchoolHub Security Alert: Your 6-Digit Password Change OTP is: *${otpCode}*. Valid for 5 minutes. Do not share with anyone.`;
-    const sent = await sendWhatsAppText(targetPhone, message);
+    const result = await queueTemplateNotification('auth.otp', {
+      to: targetPhone,
+      params: { code: otpCode },
+      dedupeKey: `otp:teacher-password-change:${userId}:${otpCode}`
+    });
+    if (!result.queued) console.error(`[Teacher Password OTP] Not queued for ${targetPhone}: ${result.reason}`);
 
     return res.status(200).json({
       success: true,
-      message: `WhatsApp OTP ${sent ? 'sent' : 'simulated'} for ${targetPhone}`,
-      sent,
+      message: `WhatsApp OTP ${result.queued ? 'sent' : 'could not be queued'} for ${targetPhone}`,
+      sent: result.queued,
     });
   } catch (error: any) {
     return handleMessageField(res, error);
@@ -183,10 +194,15 @@ router.delete('/:id', requirePermission('teachers:delete'), async (req: Request,
 });
 
 // Reset Teacher Password (Admin Action)
-router.post('/:id/reset-password', async (req: Request, res: Response) => {
+router.post('/:id/reset-password', requirePermission('teachers:create'), async (req: Request, res: Response) => {
   try {
-    await resetTeacherPassword(req.params.id);
-    return res.status(200).json({ success: true, message: 'Password successfully reset.' });
+    const { passwordChanged, whatsappSent } = await resetTeacherPassword(req.params.id);
+    return res.status(200).json({
+      success: true,
+      passwordChanged,
+      whatsappSent,
+      message: 'Password reset successfully and new credentials were sent via WhatsApp.'
+    });
   } catch (error: any) {
     return handleErrorField(res, error);
   }

@@ -57,7 +57,6 @@ interface AdminStudentsProps {
   onDeleteStudents?: (studentIds: string[]) => void;
   onPromoteStudents?: (studentIds: string[]) => void;
   onMessageParent: (student: StudentData) => void;
-  onMessageStudents?: (studentIds: string[]) => void;
   showToast: (message: string, type?: 'success' | 'error') => void;
   editingStudentId: string | null;
   onEditStudent: (student: StudentData) => void;
@@ -68,7 +67,7 @@ interface AdminStudentsProps {
 const AdminStudents: React.FC<AdminStudentsProps> = ({
   students, teachers, classesList = [],
   newStudent, onNewStudentChange, onCreateStudent,
-  onDeleteStudent, onDeleteStudents, onPromoteStudents, onMessageParent, onMessageStudents, showToast,
+  onDeleteStudent, onDeleteStudents, onPromoteStudents, onMessageParent, showToast,
   editingStudentId, onEditStudent, onCancelEditStudent, onFetchNextAdmissionNo,
 }) => {
   void [showToast];
@@ -499,11 +498,6 @@ const AdminStudents: React.FC<AdminStudentsProps> = ({
       {selectedStudentIds.length > 0 && (
         <div className="flex items-center gap-3 px-4 py-2.5 bg-blue-lt border border-blue-200 rounded-lg">
           <span className="text-sm font-bold text-blue">{selectedStudentIds.length} selected</span>
-          {onMessageStudents && (
-            <button className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-md text-white" style={{ background: '#25D366' }} onClick={() => onMessageStudents(selectedStudentIds)}>
-              <MessageSquare size={13} /> WhatsApp All
-            </button>
-          )}
           {onPromoteStudents && (
             <Button variant="secondary" size="sm" onClick={() => onPromoteStudents(selectedStudentIds)}>
               <GraduationCap size={13} /> Promote to Next Class

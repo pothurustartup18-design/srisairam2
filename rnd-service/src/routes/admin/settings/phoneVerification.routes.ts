@@ -4,7 +4,8 @@ import { requireRole } from '../../../middlewares/auth.middleware';
 import { requirePermission } from '../../../middlewares/permission.middleware';
 import { User } from '../../../models/user.model';
 import { PhoneVerification } from '../../../models/phoneVerification.model';
-import { normalizePhone, sendWhatsAppText } from '../../../services/whatsapp.service';
+import { normalizePhone } from '../../../services/whatsapp.service';
+import { queueTemplateNotification } from '../../../config/queue';
 
 // Helper: SHA-256 hash (same pattern used in auth.controller.ts)
 const hashOTP = (otp: string): string =>
@@ -65,11 +66,14 @@ router.post('/verify-phone/send', requireRole(['admin']), requirePermission('set
       expiresAt
     });
 
-    // Send via WhatsApp
-    let sent = false;
+    // Send via the approved o_auth AUTHENTICATION template
     try {
-      const message = `🔐 SchoolHub Verification Code: Your 6-digit verification code is *${otp}*. Valid for 10 minutes. Do not share.`;
-      sent = await sendWhatsAppText(phoneResult.e164, message);
+      const result = await queueTemplateNotification('auth.otp', {
+        to: phoneResult.e164,
+        params: { code: otp },
+        dedupeKey: `otp:phone-verify:${cleanPhone}:${otp}`
+      });
+      if (!result.queued) console.error(`[Phone Verification WhatsApp] Not queued: ${result.reason}`);
     } catch (err: any) {
       console.error('[Phone Verification WhatsApp Error]:', err.message);
     }

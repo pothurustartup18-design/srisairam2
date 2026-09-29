@@ -202,6 +202,34 @@ describe('sendWhatsAppTemplate', () => {
     expect(result.error?.retryable).toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it('sends a positional AUTHENTICATION template (o_auth) with a copy-code BUTTON component', async () => {
+    fetchMock.mockResolvedValueOnce(okResponse());
+    const result = await sendWhatsAppTemplate('8899582239', 'o_auth', 'en', ['482913'], { otpButtonCode: '482913' });
+    expect(result.success).toBe(true);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.template.components).toHaveLength(2);
+    // BODY: positional, no parameter_name
+    expect(body.template.components[0]).toEqual({
+      type: 'body',
+      parameters: [{ type: 'text', text: '482913' }]
+    });
+    // BUTTON: copy-code, carries the same code as a coupon_code param
+    expect(body.template.components[1]).toEqual({
+      type: 'button',
+      sub_type: 'copy_code',
+      index: '0',
+      parameters: [{ type: 'coupon_code', coupon_code: '482913' }]
+    });
+  });
+
+  it('omits the BUTTON component when otpButtonCode is not supplied', async () => {
+    fetchMock.mockResolvedValueOnce(okResponse());
+    await sendWhatsAppTemplate('8899582239', 'attendance_alert_full', 'en', { student_name_en: 'Harsha' });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.template.components).toHaveLength(1);
+    expect(body.template.components[0].type).toBe('body');
+  });
 });
 
 describe('sendWhatsAppMedia', () => {

@@ -51,7 +51,8 @@ describe('queueTemplateNotification — enqueue (Redis ready)', () => {
         templateKey: 'attendance.full',
         templateName: 'attendance_alert_full',
         languageCode: 'en',
-        named: { student_name_en: 'Harsha', student_name_te: 'Harsha' },
+        bodyParameters: { student_name_en: 'Harsha', student_name_te: 'Harsha' },
+        otpButtonCode: undefined,
         dedupeKey: 'attendance:2026-09-06:stu1:full'
       },
       NOTIFICATION_JOB_OPTIONS
@@ -150,7 +151,7 @@ describe('queueTemplateNotification — document-header templates', () => {
       link: 'https://s3/receipt_FEE-1.pdf',
       filename: 'receipt_FEE-1.pdf'
     });
-    expect(Object.keys(jobData.named)).toHaveLength(10);
+    expect(Object.keys(jobData.bodyParameters)).toHaveLength(10);
   });
 
   it('rejects fee.receipt when the document header is missing (nothing queued)', async () => {
@@ -197,7 +198,7 @@ describe('queueTemplateNotification — installment templates (no header, 8 para
     expect(jobData.templateName).toBe('installment_reminder');
     expect(jobData.languageCode).toBe('en');
     expect(jobData.header).toBeUndefined();
-    expect(Object.keys(jobData.named).sort()).toEqual(Object.keys(INSTALLMENT).sort());
+    expect(Object.keys(jobData.bodyParameters).sort()).toEqual(Object.keys(INSTALLMENT).sort());
   });
 
   it('enqueues installment.overdue → installment_overdue', async () => {
@@ -224,7 +225,7 @@ describe('queueTemplateNotification — announcement + event templates', () => {
     expect(res).toEqual({ queued: true });
     const [, jobData] = addMock.mock.calls[0];
     expect(jobData.templateName).toBe('announcement_broadcast');
-    expect(jobData.named).toEqual({ custom: 'School reopens Monday.' });
+    expect(jobData.bodyParameters).toEqual({ custom: 'School reopens Monday.' });
     expect(jobData.header).toBeUndefined();
   });
 
@@ -237,7 +238,7 @@ describe('queueTemplateNotification — announcement + event templates', () => {
     expect(res).toEqual({ queued: true });
     const [, jobData] = addMock.mock.calls[0];
     expect(jobData.templateName).toBe('event_announcement');
-    expect(jobData.named).toEqual({
+    expect(jobData.bodyParameters).toEqual({
       event_title: 'Sports Day', event_date: '20 September 2026', event_description: 'Annual sports day.'
     });
   });
@@ -246,6 +247,82 @@ describe('queueTemplateNotification — announcement + event templates', () => {
     const res = await queueTemplateNotification('announcement.broadcast', { to: '8899582239', params: { custom: '   ' } });
     expect(res.queued).toBe(false);
     expect(res.reason).toMatch(/custom/);
+    expect(addMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('queueTemplateNotification — auth.otp (AUTHENTICATION, POSITIONAL, copy-code button)', () => {
+  it('enqueues o_auth as a positional array + otpButtonCode, not named params', async () => {
+    const res = await queueTemplateNotification('auth.otp', {
+      to: '8899582239',
+      params: { code: '482913' },
+      dedupeKey: 'otp:auth.otp:918899582239:482913'
+    });
+    expect(res).toEqual({ queued: true });
+    const [jobName, jobData] = addMock.mock.calls[0];
+    expect(jobName).toBe('sendWhatsAppTemplate');
+    expect(jobData.templateName).toBe('o_auth');
+    expect(jobData.bodyParameters).toEqual(['482913']);
+    expect(jobData.otpButtonCode).toBe('482913');
+    expect(jobData.header).toBeUndefined();
+  });
+
+  it('synchronous fallback (Redis down) sends the positional array + otpButtonCode', async () => {
+    redisState.status = 'end';
+    await queueTemplateNotification('auth.otp', { to: '8899582239', params: { code: '111222' } });
+    expect(sendTemplateMock).toHaveBeenCalledWith(
+      '8899582239',
+      'o_auth',
+      'en',
+      ['111222'],
+      { dedupeKey: undefined, otpButtonCode: '111222' }
+    );
+  });
+
+  it('rejects when the code param is missing', async () => {
+    const res = await queueTemplateNotification('auth.otp', { to: '8899582239', params: {} });
+    expect(res.queued).toBe(false);
+    expect(res.reason).toMatch(/code/);
+    expect(addMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('queueTemplateNotification — staff credential templates (NAMED, no header)', () => {
+  it('enqueues staff.credentials_new with all 6 named params in order', async () => {
+    const res = await queueTemplateNotification('staff.credentials_new', {
+      to: '8899582239',
+      params: {
+        name_en: 'Harsha Vardhan', employee_id_en: 'EMP-042', temporary_password_en: 'a1b2c3d4',
+        name_te: 'Harsha Vardhan', employee_id_te: 'EMP-042', temporary_password_te: 'a1b2c3d4'
+      }
+    });
+    expect(res).toEqual({ queued: true });
+    const [, jobData] = addMock.mock.calls[0];
+    expect(jobData.templateName).toBe('staff_credentials_new');
+    expect(jobData.otpButtonCode).toBeUndefined();
+    expect(Object.keys(jobData.bodyParameters)).toEqual([
+      'name_en', 'employee_id_en', 'temporary_password_en', 'name_te', 'employee_id_te', 'temporary_password_te'
+    ]);
+  });
+
+  it('enqueues staff.credentials_reset with all 4 named params in order', async () => {
+    const res = await queueTemplateNotification('staff.credentials_reset', {
+      to: '8899582239',
+      params: { username_en: 'emp-042', password_en: 'z9y8x7w6', username_te: 'emp-042', password_te: 'z9y8x7w6' }
+    });
+    expect(res).toEqual({ queued: true });
+    const [, jobData] = addMock.mock.calls[0];
+    expect(jobData.templateName).toBe('staff_credentials_reset');
+    expect(Object.keys(jobData.bodyParameters)).toEqual(['username_en', 'password_en', 'username_te', 'password_te']);
+  });
+
+  it('rejects staff.credentials_new with a missing param', async () => {
+    const res = await queueTemplateNotification('staff.credentials_new', {
+      to: '8899582239',
+      params: { name_en: 'x', employee_id_en: 'y', temporary_password_en: 'z', name_te: 'x', employee_id_te: 'y' }
+    });
+    expect(res.queued).toBe(false);
+    expect(res.reason).toMatch(/temporary_password_te/);
     expect(addMock).not.toHaveBeenCalled();
   });
 });

@@ -5,8 +5,6 @@ import { Search, Sun, Moon, Bell, MessageCircle, Check, Menu } from 'lucide-reac
 
 import Toast from '../../shared/Toast/Toast';
 import { AdminSidebar } from '../../shared/Sidebars/Sidebars';
-import MessageComposer from '../../shared/MessageComposer/MessageComposer';
-import { useMessageComposer } from '../../../hooks/useMessageComposer';
 import ErrorBoundary from '../../shared/ErrorBoundary/ErrorBoundary';
 const AdminDashboard = lazy(() => import('../AdminDashboard/AdminDashboard'));
 const AdminFeeAnalytics = lazy(() => import('../AdminFeeAnalytics/AdminFeeAnalytics'));
@@ -368,11 +366,6 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [promoteTarget]);
 
-  // ─── Direct Personal Message States ──────────────────────────────────────────
-  const [messageTarget, setMessageTarget] = useState<StudentData | null>(null);
-  const [messageTeachersTarget, setMessageTeachersTarget] = useState<string[]>([]);
-  const [messageStudentsTarget, setMessageStudentsTarget] = useState<string[]>([]);
-
   // ─── Fee Collection Search & Modal States ────────────────────────────────────
   const [collectFeeStudentId, setCollectFeeStudentId] = useState<string | undefined>(undefined);
   const [collectFeeBackView, setCollectFeeBackView] = useState<AdminView>('dashboard');
@@ -387,16 +380,11 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
   const [paymentType, setPaymentType] = useState<'school' | 'books' | 'transport'>('school');
   const [showPaymentSuccessModal, setShowPaymentSuccessModal] = useState<any | null>(null);
 
-  const [sendingMessage, setSendingMessage] = useState(false);
-
   // ─── Toast helper ────────────────────────────────────────────────────────────
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ show: true, message, type });
     setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 4000);
   };
-
-  // ─── Message composer (text + attachments + voice recording) ────────────────
-  const messageComposer = useMessageComposer(showToast);
 
   // ─── Computed values ─────────────────────────────────────────────────────────
   const filteredStudents = students.filter((s) => {
@@ -1101,40 +1089,56 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
   };
 
   // â”€â”€â”€ Event Actions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // Uploads via XMLHttpRequest (not fetch — fetch exposes no upload progress
-  // events) so the UI can show a real byte-level percentage instead of an
-  // indeterminate "Uploading…" label.
-  const uploadEventMediaWithProgress = (
-    file: File,
-    base64Data: string,
-    onProgress: (loadedBytes: number, totalBytes: number) => void
-  ): Promise<{ url: string; s3Key: string; filename: string; contentType?: string; size?: number; mediaType?: string }> => {
+  // Uploads go straight from this browser to S3 via a presigned URL — the file
+  // bytes never pass through our server at all. This replaces sending the
+  // whole file as base64 JSON to Node, which: capped uploads at nginx's
+  // client_max_body_size (60m — ~45MB of real file once base64's ~33%
+  // inflation is accounted for); forced the entire file through Node's single
+  // request-handling thread twice (parsed into the JSON body, then decoded
+  // into a Buffer), freezing every other user's request meanwhile; and spent
+  // memory the server (1.9GB, no swap) can't spare. The only request that
+  // still hits our server is a small "give me a URL for this filename" call.
+  interface EventMediaUploadResult { previewUrl: string; s3Key: string; filename: string; contentType: string; size: number; mediaType: string; }
+
+  const presignEventMedia = async (fileName: string): Promise<{ uploadUrl: string; previewUrl: string; s3Key: string; mediaType: string }> => {
+    const token = getAccessToken();
+    const headers: HeadersInit = { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+    const res = await fetch(`${API_BASE}/events/media/presign`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ fileName })
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || `Failed to prepare upload for ${fileName}`);
+    return data;
+  };
+
+  // fetch exposes no upload progress events, so the actual S3 PUT uses XHR.
+  const putFileToS3WithProgress = (file: File, uploadUrl: string, onProgress: (loaded: number, total: number) => void): Promise<void> => {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', `${API_BASE}/events/media/upload`);
-      xhr.setRequestHeader('Content-Type', 'application/json');
-      // XHR bypasses window.fetch, so the global fetch interceptor in
-      // services/api.ts (which auto-attaches this header on every fetch())
-      // never runs here — it must be set explicitly, or every upload 401s.
-      const token = getAccessToken();
-      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-      xhr.withCredentials = true;
-      xhr.upload.onprogress = (evt) => {
-        if (evt.lengthComputable) onProgress(evt.loaded, evt.total);
-      };
+      xhr.open('PUT', uploadUrl);
+      // Not part of the presigned signature (see s3.service.ts's
+      // getPresignedUploadUrl) — safe to set freely; S3 stores whatever
+      // Content-Type actually arrives on the PUT.
+      xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+      xhr.upload.onprogress = (evt) => { if (evt.lengthComputable) onProgress(evt.loaded, evt.total); };
       xhr.onload = () => {
-        let data: any;
-        try { data = JSON.parse(xhr.responseText); } catch { data = null; }
-        if (xhr.status >= 200 && xhr.status < 300 && data?.success) {
-          onProgress(1, 1); // this file's XHR body finished sending
-          resolve({ url: data.url, s3Key: data.s3Key, filename: data.filename, contentType: data.contentType, size: data.size, mediaType: data.mediaType });
-        } else {
-          reject(new Error(data?.message || `Failed to upload ${file.name}`));
-        }
+        if (xhr.status >= 200 && xhr.status < 300) { onProgress(file.size, file.size); resolve(); }
+        else reject(new Error(`Failed to upload ${file.name} to storage.`));
       };
-      xhr.onerror = () => reject(new Error(`Failed to upload ${file.name}`));
-      xhr.send(JSON.stringify({ fileName: file.name, mediaBase64: base64Data }));
+      xhr.onerror = () => reject(new Error(`Failed to upload ${file.name} to storage.`));
+      xhr.send(file);
     });
+  };
+
+  const uploadEventMediaWithProgress = async (
+    file: File,
+    onProgress: (loadedBytes: number, totalBytes: number) => void
+  ): Promise<EventMediaUploadResult> => {
+    const { uploadUrl, previewUrl, s3Key, mediaType } = await presignEventMedia(file.name);
+    await putFileToS3WithProgress(file, uploadUrl, onProgress);
+    return { previewUrl, s3Key, filename: file.name, contentType: file.type || 'application/octet-stream', size: file.size, mediaType };
   };
 
   const handleMediaUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1145,40 +1149,29 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
 
     // Per-file loaded/total bytes, summed into one overall percentage across
     // the whole batch — simpler and more useful here than N separate bars.
+    // File sizes are known upfront now (no base64 round trip needed to learn
+    // them), so totals start accurate instead of filling in on first tick.
     const loadedByFile = new Array(files.length).fill(0);
-    const totalByFile = new Array(files.length).fill(0);
+    const totalByFile = files.map((f) => f.size || 1);
     const recomputeOverall = () => {
       const loaded = loadedByFile.reduce((a, b) => a + b, 0);
       const total = totalByFile.reduce((a, b) => a + b, 0);
       setMediaUploadPercent(total > 0 ? Math.round((loaded / total) * 100) : 0);
     };
 
-    const uploadPromises = files.map((file, index) => {
-      return new Promise<{ url: string; s3Key: string; filename: string; contentType?: string; size?: number; mediaType?: string }>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = async () => {
-          const base64Data = reader.result as string;
-          try {
-            const uploaded = await uploadEventMediaWithProgress(file, base64Data, (loaded, total) => {
-              loadedByFile[index] = loaded;
-              totalByFile[index] = total;
-              recomputeOverall();
-            });
-            resolve(uploaded);
-          } catch (err) {
-            reject(err);
-          }
-        };
-        reader.onerror = () => reject(new Error('Failed to read ' + file.name));
-      });
-    });
+    const uploadPromises = files.map((file, index) =>
+      uploadEventMediaWithProgress(file, (loaded, total) => {
+        loadedByFile[index] = loaded;
+        totalByFile[index] = total || file.size || 1;
+        recomputeOverall();
+      })
+    );
 
     try {
       const uploaded = await Promise.all(uploadPromises);
       setNewEvent(prev => ({
         ...prev,
-        media: [...prev.media, ...uploaded.map(u => u.url)],
+        media: [...prev.media, ...uploaded.map(u => u.previewUrl)],
         mediaAttachments: [...prev.mediaAttachments, ...uploaded.map(u => ({ s3Key: u.s3Key, filename: u.filename, contentType: u.contentType, size: u.size, mediaType: u.mediaType }))]
       }));
       showToast(`${uploaded.length} file(s) successfully uploaded.`);
@@ -1330,107 +1323,21 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
     }
   };
 
-  // ─── Send Personal Message ───────────────────────────────────────────────────
-  const handleSendPersonalMessage = async () => {
-    if (!messageTarget || !messageComposer.text.trim()) return;
-    setSendingMessage(true);
-    const studentId = messageTarget.id || messageTarget._id;
-    try {
-      const res = await fetch(`${API_BASE}/messages/student/${studentId}/whatsapp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: messageComposer.text.trim(),
-          media: messageComposer.attachments.length > 0 ? messageComposer.attachments : undefined
-        })
-      });
-      const resData = await res.json();
-      if (resData.success) {
-        showToast(`WhatsApp message sent to parent of ${messageTarget.name}.`);
-        setMessageTarget(null);
-      } else {
-        showToast(resData.message || 'Failed to send WhatsApp message.', 'error');
-      }
-    } catch (err: any) {
-      showToast(err.message || 'Failed to send WhatsApp message.', 'error');
-    } finally {
-      setSendingMessage(false);
-      messageComposer.reset();
-    }
-  };
-
-  const handleSendPersonalMessageToTeachers = async () => {
-    if (messageTeachersTarget.length === 0 || !messageComposer.text.trim()) return;
-    setSendingMessage(true);
-    let successCount = 0;
-    let failCount = 0;
-
-    for (const teacherId of messageTeachersTarget) {
-      try {
-        const res = await fetch(`${API_BASE}/messages/teacher/${teacherId}/whatsapp`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${getAccessToken()}`
-          },
-          body: JSON.stringify({
-            text: messageComposer.text.trim(),
-            media: messageComposer.attachments.length > 0 ? messageComposer.attachments : undefined
-          })
-        });
-        const resData = await res.json();
-        if (resData.success) {
-          successCount++;
-        } else {
-          failCount++;
-        }
-      } catch {
-        failCount++;
-      }
-    }
-
-    showToast(`WhatsApp send complete: ${successCount} sent, ${failCount} failed.`);
-    setMessageTeachersTarget([]);
-    setSendingMessage(false);
-    messageComposer.reset();
-    fetchWhatsappQuota(); // update counter immediately
-  };
-
-  const handleSendPersonalMessageToStudents = async () => {
-    if (messageStudentsTarget.length === 0 || !messageComposer.text.trim()) return;
-    setSendingMessage(true);
-    let successCount = 0;
-    let failCount = 0;
-
-    for (const studentId of messageStudentsTarget) {
-      try {
-        const res = await fetch(`${API_BASE}/messages/student/${studentId}/whatsapp`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${getAccessToken()}`
-          },
-          body: JSON.stringify({
-            text: messageComposer.text.trim(),
-            media: messageComposer.attachments.length > 0 ? messageComposer.attachments : undefined
-          })
-        });
-        const resData = await res.json();
-        if (resData.success) {
-          successCount++;
-        } else {
-          failCount++;
-        }
-      } catch {
-        failCount++;
-      }
-    }
-
-    showToast(`WhatsApp send complete: ${successCount} sent, ${failCount} failed.`);
-    setMessageStudentsTarget([]);
-    setSendingMessage(false);
-    messageComposer.reset();
-    fetchWhatsappQuota(); // update counter immediately
+  // ─── Message Parent (opens the admin's own WhatsApp) ─────────────────────────
+  // The in-app "Message Parent via WhatsApp" popup sent free-form text through
+  // POST /messages/student/:id/whatsapp (sendWhatsAppWithAttachments) — no
+  // approved Meta template backs that route, so Meta silently drops the
+  // message outside a 24h reply window (see event.routes.ts/whatsappTemplates.ts
+  // for the same failure mode elsewhere). Rather than build a template for a
+  // free-typed one-off note, this opens a wa.me chat with the parent's number
+  // instead: the admin sends it from their own WhatsApp app (desktop, if
+  // installed and registered as the link handler — wa.me itself prompts to
+  // install otherwise, or falls back to WhatsApp Web), which isn't subject to
+  // the Business API's template restriction at all.
+  const openWhatsAppChat = (whatsappNo?: string, label = 'this contact') => {
+    if (!whatsappNo) { showToast(`No WhatsApp number on file for ${label}.`, 'error'); return; }
+    const digits = whatsappNo.replace(/\D/g, '');
+    window.open(`https://wa.me/${digits}`, '_blank', 'noopener,noreferrer');
   };
 
   // â”€â”€â”€ Navigate helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1569,7 +1476,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                   onAdmitStudent={() => setActiveView('students')}
                   onSendReminder={(student) => handleSendReminder(student.id || student._id, 'all')}
                   onDeleteStudent={(student) => setDeleteTarget({ type: 'student', data: student })}
-                  onMessageParent={(student) => setMessageTarget(student)}
+                  onMessageParent={(student) => openWhatsAppChat(student.whatsappNo, student.name)}
                   showToast={showToast}
                   onCollectFee={(studentId) => {
                     setCollectFeeStudentId(studentId);
@@ -1590,7 +1497,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                   classesList={classesList}
                   onSendReminder={(student) => handleSendReminder(student.id || student._id, 'all')}
                   onDeleteStudent={(student) => setDeleteTarget({ type: 'student', data: student })}
-                  onMessageParent={(student) => setMessageTarget(student)}
+                  onMessageParent={(student) => openWhatsAppChat(student.whatsappNo, student.name)}
                   showToast={showToast}
                   onCollectFee={(studentId) => {
                     setCollectFeeStudentId(studentId);
@@ -1662,7 +1569,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                   editingTeacherId={editingTeacherId}
                   onEditTeacher={handleEditTeacher}
                   onCancelEditTeacher={handleCancelEditTeacher}
-                  onMessageTeachers={(teacherIds) => setMessageTeachersTarget(teacherIds)}
+                  onMessageTeacher={(teacher) => openWhatsAppChat(teacher.phone, teacher.name)}
                   showToast={showToast}
                 />
               )}
@@ -1678,8 +1585,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
                   onDeleteStudent={(student) => setDeleteTarget({ type: 'student', data: student })}
                   onDeleteStudents={(studentIds) => setDeleteTarget({ type: 'student', bulkIds: studentIds })}
                   onPromoteStudents={(studentIds) => setPromoteTarget(studentIds)}
-                  onMessageParent={(student) => setMessageTarget(student)}
-                  onMessageStudents={(studentIds) => setMessageStudentsTarget(studentIds)}
+                  onMessageParent={(student) => openWhatsAppChat(student.whatsappNo, student.name)}
                   showToast={showToast}
                   editingStudentId={editingStudentId}
                   onEditStudent={handleEditStudent}
@@ -1917,60 +1823,6 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
         </div>
       )}
 
-      {/* Send Message to Parent Modal */}
-      {messageTarget && (
-        <div className="modal-overlay" onClick={() => { setMessageTarget(null); messageComposer.reset(); }}>
-          <div className="modal-content" style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
-            <h4 className="modal-title">💬 Message Parent via WhatsApp</h4>
-            <p className="modal-desc" style={{ marginBottom: '16px' }}>
-              Send a one-off WhatsApp notification to the parent of <strong>{messageTarget.name}</strong> at <strong>{messageTarget.whatsappNo}</strong>.
-              This is separate from the in-app Direct Messages inbox — it is not saved as a portal conversation.
-            </p>
-            <MessageComposer
-              composer={messageComposer}
-              onSend={handleSendPersonalMessage}
-              onCancel={() => { setMessageTarget(null); messageComposer.reset(); }}
-              sending={sendingMessage}
-            />
-          </div>
-        </div>
-      )}
-      {/* Send Message to Students Modal */}
-      {messageStudentsTarget.length > 0 && (
-        <div className="modal-overlay" onClick={() => { setMessageStudentsTarget([]); messageComposer.reset(); }}>
-          <div className="modal-content" style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
-            <h4 className="modal-title">💬 Message Parent(s) via WhatsApp</h4>
-            <p className="modal-desc" style={{ marginBottom: '16px' }}>
-              Send a one-off WhatsApp notification to the parents of the selected {messageStudentsTarget.length} student(s).
-              This is separate from the in-app Direct Messages inbox.
-            </p>
-            <MessageComposer
-              composer={messageComposer}
-              onSend={handleSendPersonalMessageToStudents}
-              onCancel={() => { setMessageStudentsTarget([]); messageComposer.reset(); }}
-              sending={sendingMessage}
-            />
-          </div>
-        </div>
-      )}
-      {/* Send Message to Teachers Modal */}
-      {messageTeachersTarget.length > 0 && (
-        <div className="modal-overlay" onClick={() => { setMessageTeachersTarget([]); messageComposer.reset(); }}>
-          <div className="modal-content" style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
-            <h4 className="modal-title">💬 Message Teacher(s) via WhatsApp</h4>
-            <p className="modal-desc" style={{ marginBottom: '16px' }}>
-              Send a one-off WhatsApp notification to the selected {messageTeachersTarget.length} teacher(s).
-              This is separate from the in-app Direct Messages inbox.
-            </p>
-            <MessageComposer
-              composer={messageComposer}
-              onSend={handleSendPersonalMessageToTeachers}
-              onCancel={() => { setMessageTeachersTarget([]); messageComposer.reset(); }}
-              sending={sendingMessage}
-            />
-          </div>
-        </div>
-      )}
       {/* â”€â”€â”€ UNIFIED FEE COLLECTION MODAL (multi-step) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {(feeModalStep === 'search' || feeModalStep === 'payment' || feeModalStep === 'success') && (() => {
         const closeAll = () => {

@@ -125,22 +125,33 @@ const HomeworkBoard: React.FC<HomeworkBoardProps> = ({
 
   useEffect(() => { loadHomework(); }, [selectedRoom]);
 
+  // Presigned direct-to-S3 upload (see event.routes.ts POST /events/media/presign,
+  // shared here — the S3 key layout isn't event-specific) — the file bytes go
+  // straight from this browser to S3, never through Node as base64 JSON.
+  const uploadHomeworkAttachment = async (file: File): Promise<string> => {
+    const presignRes = await fetch(`${API_BASE}/events/media/presign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileName: file.name })
+    });
+    const presignData = await presignRes.json();
+    if (!presignData.success) throw new Error(presignData.message || `Failed to prepare upload for ${file.name}`);
+
+    const putRes = await fetch(presignData.uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      body: file
+    });
+    if (!putRes.ok) throw new Error(`Failed to upload ${file.name}.`);
+
+    return presignData.previewUrl as string;
+  };
+
   const handleFileAttach = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files ? Array.from(e.target.files) : [];
     if (!files.length) return;
     setUploadingFile(true);
-    Promise.all(files.map(file => new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = async () => {
-        try {
-          const res  = await fetch(`${API_BASE}/events/media/upload`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileName: file.name, mediaBase64: reader.result }) });
-          const data = await res.json();
-          if (data.success) resolve(data.url); else reject();
-        } catch { reject(); }
-      };
-      reader.onerror = () => reject();
-    })))
+    Promise.all(files.map(uploadHomeworkAttachment))
       .then(urls => setAttachments(prev => [...prev, ...urls]))
       .catch(() => showToast('Some attachments failed to upload.', 'error'))
       .finally(() => { setUploadingFile(false); e.target.value = ''; });

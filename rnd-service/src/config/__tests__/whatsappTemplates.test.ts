@@ -290,7 +290,7 @@ describe('announcement + event templates (MARKETING, text-only)', () => {
 });
 
 describe('registry completeness — every active production template is registered', () => {
-  it('has exactly the 12 expected keys → exact Meta names', () => {
+  it('has exactly the 15 expected keys → exact Meta names', () => {
     const expected: Record<string, string> = {
       'attendance.full': 'attendance_alert_full',
       'attendance.morning': 'attendance_alert_morning',
@@ -306,7 +306,10 @@ describe('registry completeness — every active production template is register
       'announcement.broadcast': 'announcement_broadcast',
       'event.announcement': 'event_announcement',
       'event.announcement_media': 'event_announcement_media',
-      'transport.alert': 'transport_bus_alert'
+      'transport.alert': 'transport_bus_alert',
+      'auth.otp': 'o_auth',
+      'staff.credentials_new': 'staff_credentials_new',
+      'staff.credentials_reset': 'staff_credentials_reset'
     };
     expect(Object.keys(WHATSAPP_TEMPLATES).sort()).toEqual(Object.keys(expected).sort());
     for (const [k, meta] of Object.entries(expected)) {
@@ -316,17 +319,101 @@ describe('registry completeness — every active production template is register
   });
 
   it('never registers a rejected / test / pending template', () => {
-    const banned = ['staff_credentials_new', 'staff_credentials_reset', 'hello_world', 'school_notification'];
+    const banned = ['hello_world', 'school_notification'];
     const registered = Object.values(WHATSAPP_TEMPLATES).map((t) => t.metaName);
     for (const b of banned) expect(registered).not.toContain(b);
   });
 });
 
 describe('MISSING_TEMPLATES — proactive features with no approved template', () => {
-  it('documents the 2 remaining gaps (fee reminder and transport alert now have approved templates)', () => {
-    expect(Object.keys(MISSING_TEMPLATES).sort()).toEqual(['auth.otp', 'staff.credentials'].sort());
-    expect(Object.keys(MISSING_TEMPLATES)).not.toContain('fee.general_reminder');
-    expect(Object.keys(MISSING_TEMPLATES)).not.toContain('transport.alert');
+  it('is empty — o_auth, staff_credentials_new and staff_credentials_reset are now approved', () => {
+    expect(Object.keys(MISSING_TEMPLATES)).toEqual([]);
+  });
+});
+
+describe('auth.otp — o_auth (AUTHENTICATION, POSITIONAL, copy-code button)', () => {
+  it('maps to o_auth / en / positional single param "code" / otpButton', () => {
+    const def = getRegisteredTemplate('auth.otp')!;
+    expect(def.metaName).toBe('o_auth');
+    expect(def.language).toBe('en');
+    expect(def.category).toBe('authentication');
+    expect(def.parameterFormat).toBe('positional');
+    expect(def.otpButton).toBe(true);
+    expect(def.parameters).toEqual(['code']);
+    expect(def.header).toBeUndefined();
+  });
+
+  it('resolves with the code and surfaces parameterFormat/otpButton on the resolved message', () => {
+    const res = resolveTemplateMessage('auth.otp', { code: '482913' });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.message.metaName).toBe('o_auth');
+    expect(res.message.named).toEqual({ code: '482913' });
+    expect(res.message.parameterFormat).toBe('positional');
+    expect(res.message.otpButton).toBe(true);
+  });
+
+  it('rejects when the code is missing', () => {
+    const res = resolveTemplateMessage('auth.otp', {});
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toMatch(/missing required parameter\(s\): code/);
+  });
+});
+
+describe('staff.credentials_new — staff_credentials_new (NAMED, no header, no button)', () => {
+  const PARAMS = {
+    name_en: 'Harsha Vardhan', employee_id_en: 'EMP-042', temporary_password_en: 'a1b2c3d4',
+    name_te: 'Harsha Vardhan', employee_id_te: 'EMP-042', temporary_password_te: 'a1b2c3d4'
+  };
+
+  it('maps to staff_credentials_new / en / 6 named params', () => {
+    const def = getRegisteredTemplate('staff.credentials_new')!;
+    expect(def.metaName).toBe('staff_credentials_new');
+    expect(def.language).toBe('en');
+    expect(def.parameterFormat ?? 'named').toBe('named');
+    expect(def.otpButton ?? false).toBe(false);
+    expect(def.header).toBeUndefined();
+    expect(def.parameters).toEqual([
+      'name_en', 'employee_id_en', 'temporary_password_en', 'name_te', 'employee_id_te', 'temporary_password_te'
+    ]);
+  });
+
+  it('resolves with all 6 params in order', () => {
+    const res = resolveTemplateMessage('staff.credentials_new', PARAMS);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.message.parameterFormat).toBe('named');
+    expect(res.message.otpButton).toBe(false);
+    expect(Object.keys(res.message.named)).toEqual(Object.keys(PARAMS));
+  });
+
+  it('rejects when a param is missing', () => {
+    const { temporary_password_te, ...rest } = PARAMS;
+    const res = resolveTemplateMessage('staff.credentials_new', rest);
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toMatch(/temporary_password_te/);
+  });
+});
+
+describe('staff.credentials_reset — staff_credentials_reset (NAMED, no header, no button)', () => {
+  it('maps to staff_credentials_reset / en / 4 named params', () => {
+    const def = getRegisteredTemplate('staff.credentials_reset')!;
+    expect(def.metaName).toBe('staff_credentials_reset');
+    expect(def.language).toBe('en');
+    expect(def.header).toBeUndefined();
+    expect(def.parameters).toEqual(['username_en', 'password_en', 'username_te', 'password_te']);
+  });
+
+  it('resolves with all 4 params', () => {
+    const res = resolveTemplateMessage('staff.credentials_reset', {
+      username_en: 'emp-042', password_en: 'z9y8x7w6', username_te: 'emp-042', password_te: 'z9y8x7w6'
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.message.otpButton).toBe(false);
+    expect(Object.keys(res.message.named)).toEqual(['username_en', 'password_en', 'username_te', 'password_te']);
   });
 });
 

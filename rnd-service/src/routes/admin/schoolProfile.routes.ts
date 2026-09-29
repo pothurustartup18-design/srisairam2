@@ -3,7 +3,7 @@ import { SchoolProfile } from '../../models/schoolProfile.model';
 import { User } from '../../models/user.model';
 import { ProfileUpdateOTP } from '../../models/profileUpdateOTP.model';
 import { authenticateJWT, requireRole } from '../../middlewares/auth.middleware';
-import { sendWhatsAppText } from '../../services/whatsapp.service';
+import { queueTemplateNotification } from '../../config/queue';
 import crypto from 'crypto';
 import { emitToAll } from '../../config/socket';
 import { getPresignedDownloadUrl } from '../../services/s3.service';
@@ -325,15 +325,18 @@ router.post('/send-otp', authenticateJWT, requireRole(['admin']), async (req: Re
       console.log(`\n[DEV] Admin Profile Update OTP for Admin user ${adminId} (${targetPhone}): ${otpCode}\n`);
     }
 
-    const message = `🔐 SchoolHub Security Alert: Your 6-Digit Admin Profile Update OTP is: *${otpCode}*. Valid for 5 minutes. Do not share with anyone.`;
-    
-    // Dispatch via WhatsApp Cloud API service
-    const sent = await sendWhatsAppText(targetPhone, message);
+    // Dispatch via the approved o_auth AUTHENTICATION template
+    const result = await queueTemplateNotification('auth.otp', {
+      to: targetPhone,
+      params: { code: otpCode },
+      dedupeKey: `otp:admin-profile-update:${adminId}:${otpCode}`
+    });
+    if (!result.queued) console.error(`[Admin Profile OTP] Not queued for ${targetPhone}: ${result.reason}`);
 
     return res.status(200).json({
       success: true,
-      message: `WhatsApp OTP ${sent ? 'sent' : 'simulated'} for ${targetPhone}`,
-      sent
+      message: `WhatsApp OTP ${result.queued ? 'sent' : 'could not be queued'} for ${targetPhone}`,
+      sent: result.queued
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, message: error.message || 'Failed to dispatch WhatsApp OTP' });

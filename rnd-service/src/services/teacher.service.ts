@@ -7,6 +7,10 @@ import { PhoneVerification } from '../models/phoneVerification.model';
 import { getNextEmployeeId } from '../utils/sequence';
 import { isValidPhone } from '../utils/validators';
 import { ServiceError } from '../utils/responseHelpers';
+import { sendTemplateNotificationSync } from '../config/queue';
+import { retryDbWrite } from '../utils/retry';
+import { isDuplicateKeyError, duplicateKeyField } from '../utils/mongoErrors';
+import redisClient from '../config/redis';
 import { clearCache } from '../middlewares/cache.middleware';
 import { getPresignedDownloadUrl } from './s3.service';
 import { buildDocumentKey, uploadBase64Document, deleteDocumentFromS3, presignDocumentList } from './document.service';
@@ -49,11 +53,25 @@ async function syncClassTeacherWithStudents(
   }
 }
 
+const ALLOWED_GENDERS = ['male', 'female', 'other'];
+
 export async function createTeacher(body: any) {
   const { name, gender, dob, phone, email, address, subjects, teachingClasses, classTeacherOf, employeeId, cluster, salary } = body;
 
   if (!name || !gender || !dob || !phone) {
     throw new ServiceError(400, 'Name, gender, dob, and phone are required.');
+  }
+
+  // Deterministic validations that Mongoose's schema would otherwise only
+  // catch at .save() time — checked BEFORE anything else so a bad `gender` or
+  // unparseable `dob` can never slip past the WhatsApp send and only THEN fail
+  // to save (see the atomicity review below for why this matters).
+  if (!ALLOWED_GENDERS.includes(gender)) {
+    throw new ServiceError(400, `Gender must be one of: ${ALLOWED_GENDERS.join(', ')}.`);
+  }
+  const dobDate = new Date(dob);
+  if (Number.isNaN(dobDate.getTime())) {
+    throw new ServiceError(400, 'Date of birth is not a valid date.');
   }
 
   if (!isValidPhone(phone.replace(/\D/g, ''))) {
@@ -97,36 +115,133 @@ export async function createTeacher(body: any) {
   const firstName = nameParts[0];
   const lastName = nameParts.slice(1).join(' ') || '';
 
-  const user = new User({
-    username: finalUsername,
-    email: emailNormalized || undefined,
-    password: tempPassword,
-    role: 'teacher',
-    firstName,
-    lastName,
-    phone,
-    isActive: true,
-    mustChangePassword: true,
-  });
-  await user.save();
+  // ── Reservation phase ────────────────────────────────────────────────────
+  // The findOne checks above are a fast, friendly pre-check but are NOT atomic
+  // — two concurrent requests can both pass them before either writes anything
+  // (a classic check-then-act race). The real guard is the unique index on
+  // User.username / User.email / Teacher.employeeId. So the actual creation
+  // happens HERE, now, atomically — but with the User left `isActive: false`
+  // (the same flag the login gate in config/passport.ts already checks), so
+  // nothing usable exists yet. This deterministically closes the race: the
+  // LOSING concurrent request fails right here on a duplicate-key error,
+  // BEFORE any WhatsApp message is ever sent for it — instead of both
+  // requests racing to send a real WhatsApp message first and only
+  // discovering the conflict afterwards.
+  let user: InstanceType<typeof User>;
+  try {
+    user = new User({
+      username: finalUsername,
+      email: emailNormalized || undefined,
+      password: tempPassword,
+      role: 'teacher',
+      firstName,
+      lastName,
+      phone,
+      isActive: false, // reservation only — flipped true after WhatsApp succeeds
+      mustChangePassword: true,
+    });
+    await user.save();
+  } catch (err: any) {
+    if (isDuplicateKeyError(err)) {
+      const field = duplicateKeyField(err);
+      throw new ServiceError(
+        400,
+        field === 'email' ? `A user with email ${email} already exists.` : `Username or employee ID ${finalUsername} is already in use.`
+      );
+    }
+    throw err;
+  }
 
-  const teacher = new Teacher({
-    userId: user._id,
-    employeeId: finalEmpId,
-    name,
-    gender,
-    dob: new Date(dob),
-    phone,
-    email: email || undefined,
-    address: address || '',
-    assignedClass: teachingClasses && teachingClasses.length > 0 ? teachingClasses.join(', ') : (classTeacherOf || ''),
-    subjects: subjects || [],
-    teachingClasses: teachingClasses || [],
-    classTeacherOf: classTeacherOf || null,
-    cluster: cluster || '',
-    salary: salary || 0,
-  });
-  await teacher.save();
+  let teacher: InstanceType<typeof Teacher>;
+  try {
+    teacher = new Teacher({
+      userId: user._id,
+      employeeId: finalEmpId,
+      name,
+      gender,
+      dob: dobDate,
+      phone,
+      email: email || undefined,
+      address: address || '',
+      assignedClass: teachingClasses && teachingClasses.length > 0 ? teachingClasses.join(', ') : (classTeacherOf || ''),
+      subjects: subjects || [],
+      teachingClasses: teachingClasses || [],
+      classTeacherOf: classTeacherOf || null,
+      cluster: cluster || '',
+      salary: salary || 0,
+    });
+    await teacher.save();
+  } catch (err: any) {
+    // Compensate: don't leave the User reservation behind if its Teacher half
+    // could not be created — this is deleting an inert, never-activated row,
+    // not "rolling back" anything meaningful.
+    await User.deleteOne({ _id: user._id }).catch(() => {});
+    if (isDuplicateKeyError(err)) {
+      throw new ServiceError(400, `A teacher with employee ID ${finalEmpId} already exists.`);
+    }
+    throw err;
+  }
+
+  // ── Send phase ────────────────────────────────────────────────────────────
+  // Synchronous — bypasses BullMQ/Redis and waits for the real Graph API
+  // result (including whatsapp.service's own in-process retry for transient
+  // errors). requireLiveSend guards against a misconfigured production deploy
+  // silently running in WhatsApp "simulation mode" (see config/queue.ts).
+  const sendResult = await sendTemplateNotificationSync(
+    'staff.credentials_new',
+    {
+      to: phone,
+      params: {
+        name_en: name,
+        employee_id_en: finalEmpId,
+        temporary_password_en: tempPassword,
+        name_te: name,
+        employee_id_te: finalEmpId,
+        temporary_password_te: tempPassword
+      },
+      dedupeKey: `staff-credentials-new:${finalEmpId}`
+    },
+    { requireLiveSend: true }
+  );
+
+  if (!sendResult.success) {
+    console.error(`[WhatsApp] staff_credentials_new not accepted by Meta for teacher ${name} (${phone}): ${sendResult.reason}`);
+    // Compensate: the reservation was never activated/usable, so removing it
+    // leaves the system exactly as if this request had never happened.
+    await Teacher.deleteOne({ _id: teacher._id }).catch(() => {});
+    await User.deleteOne({ _id: user._id }).catch(() => {});
+    throw new ServiceError(502, 'WhatsApp message could not be sent. User was not created.', {
+      userCreated: false,
+      whatsappSent: false
+    });
+  }
+
+  // ── Activation phase ─────────────────────────────────────────────────────
+  // WhatsApp has already, irreversibly, delivered the credentials. This write
+  // now MUST succeed for the account to become usable. A transient Mongo blip
+  // is retried a few times (safe — setting isActive true is idempotent). If it
+  // still fails, we do NOT pretend to roll anything back (the message is
+  // already out and cannot be unsent) — we surface the ambiguous state
+  // honestly instead of silently leaving a stuck, inactive account behind.
+  try {
+    await retryDbWrite(async () => {
+      user.isActive = true;
+      await user.save();
+    });
+  } catch (err: any) {
+    console.error(
+      `[CRITICAL][WhatsApp/DB mismatch] staff_credentials_new was accepted by Meta for teacher ${name} (${phone}, ` +
+        `employeeId ${finalEmpId}, userId ${user._id}) but activating the account failed after retries: ${err.message}. ` +
+        `The credential message was already delivered — do NOT retry this request (it would send a second, different ` +
+        `password to the same person). This account needs manual investigation/finalization.`
+    );
+    throw new ServiceError(
+      502,
+      'Credentials were sent via WhatsApp, but the account could not be finalized. Do not retry — contact a system administrator.',
+      { userCreated: 'unknown', whatsappSent: true }
+    );
+  }
+
   await syncClassTeacherWithStudents(teacher._id.toString(), null, classTeacherOf);
   await clearCache('/api/dashboard/*');
 
@@ -138,20 +253,11 @@ export async function createTeacher(body: any) {
     console.log(`[Teacher Created] ${name} (Employee ID: ${finalEmpId}) — credentials delivered via WhatsApp.`);
   }
 
-  // BLOCKED: no approved Meta template for staff credentials (staff_credentials_new
-  // REJECTED, school_notification PENDING). Proactive free-form is disabled — the
-  // credentials are returned to the caller for the admin to relay.
-  const whatsappSent = false;
-  console.warn(
-    `[BLOCKED] Teacher onboarding credentials for ${name} (${phone}) NOT sent over WhatsApp — ` +
-      `no approved Meta template. Deliver credentials from the ERP response.`
-  );
-
   await PhoneVerification.deleteOne({ phone: cleanPhone });
 
   return {
     teacher,
-    credentials: { employeeId: finalEmpId, username: finalEmpId, password: tempPassword, whatsappSent },
+    credentials: { employeeId: finalEmpId, username: finalUsername, whatsappSent: true },
   };
 }
 
@@ -233,7 +339,6 @@ export async function updateTeacher(teacherId: string, body: any) {
 
       await user.save();
 
-      const redisClient = require('../config/redis').default;
       if (redisClient && redisClient.status === 'ready') {
         await redisClient.del(`user:profile:${user._id}`).catch(() => {});
       }
@@ -296,30 +401,79 @@ export async function deleteTeacher(teacherId: string, password: string | undefi
   await clearCache('/api/dashboard/*');
 }
 
-export async function resetTeacherPassword(teacherId: string) {
+export async function resetTeacherPassword(teacherId: string): Promise<{ passwordChanged: boolean; whatsappSent: boolean }> {
   const teacher = await Teacher.findById(teacherId);
   if (!teacher) throw new ServiceError(404, 'Teacher not found.');
 
   const user = await User.findById(teacher.userId);
   if (!user) throw new ServiceError(404, 'Linked user credentials not found.');
 
-  const tempPassword = crypto.randomBytes(4).toString('hex');
-  user.password = tempPassword;
-  user.mustChangePassword = true;
-  await user.save();
+  const targetPhone = teacher.phone || user.phone;
+  if (!targetPhone) {
+    throw new ServiceError(400, 'No registered WhatsApp number found. Password was not changed.', {
+      passwordChanged: false,
+      whatsappSent: false
+    });
+  }
 
-  const redisClient = require('../config/redis').default;
+  // Generate the new password and send it BEFORE touching the database. The
+  // teacher's existing password must remain valid until Meta actually accepts
+  // staff_credentials_reset — otherwise a WhatsApp failure would leave the
+  // account with a new password nobody received.
+  const tempPassword = crypto.randomBytes(4).toString('hex');
+  const sendResult = await sendTemplateNotificationSync(
+    'staff.credentials_reset',
+    {
+      to: targetPhone,
+      params: {
+        username_en: user.username,
+        password_en: tempPassword,
+        username_te: user.username,
+        password_te: tempPassword
+      },
+      dedupeKey: `staff-credentials-reset:${user._id}:${Date.now()}`
+    },
+    { requireLiveSend: true }
+  );
+
+  if (!sendResult.success) {
+    console.error(`[WhatsApp] staff_credentials_reset not accepted by Meta for teacher ${teacherId} (${targetPhone}): ${sendResult.reason}`);
+    throw new ServiceError(502, 'WhatsApp message could not be sent. Password was not changed.', {
+      passwordChanged: false,
+      whatsappSent: false
+    });
+  }
+
+  // WhatsApp has already, irreversibly, delivered the new password. This write
+  // now MUST land for the account to actually be usable with it. Retry a
+  // transient Mongo blip a few times; if it still fails, do not pretend the
+  // old password is safe to rely on either — surface the ambiguity honestly
+  // (see createTeacher's activation phase for the identical reasoning).
+  try {
+    await retryDbWrite(async () => {
+      user.password = tempPassword;
+      user.mustChangePassword = true;
+      await user.save();
+    });
+  } catch (err: any) {
+    console.error(
+      `[CRITICAL][WhatsApp/DB mismatch] staff_credentials_reset was accepted by Meta for teacher ${teacherId} ` +
+        `(userId ${user._id}, ${targetPhone}) but saving the new password failed after retries: ${err.message}. ` +
+        `The new password was already delivered via WhatsApp — do NOT retry this request (it would send yet ` +
+        `another different password to the same person). This account needs manual investigation.`
+    );
+    throw new ServiceError(
+      502,
+      'A new password was sent via WhatsApp, but it could not be saved. Do not retry — contact a system administrator.',
+      { passwordChanged: 'unknown', whatsappSent: true }
+    );
+  }
+
   if (redisClient && redisClient.status === 'ready') {
     await redisClient.del(`user:profile:${user._id}`).catch(() => {});
   }
 
-  // BLOCKED: no approved Meta template for staff password-reset credentials
-  // (staff_credentials_reset REJECTED, school_notification PENDING). Proactive
-  // free-form is disabled — the reset credentials are returned to the caller.
-  console.warn(
-    `[BLOCKED] Teacher password-reset credentials (${teacher.phone || user.phone || 'no phone'}) NOT sent over WhatsApp — ` +
-      `no approved Meta template. Deliver credentials from the ERP response.`
-  );
+  return { passwordChanged: true, whatsappSent: true };
 }
 
 // ─── Documents vault ──────────────────────────────────────────────────────

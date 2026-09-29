@@ -40,7 +40,7 @@ interface AdminTeachersProps {
   editingTeacherId: string | null;
   onEditTeacher: (teacher: TeacherData) => void;
   onCancelEditTeacher: () => void;
-  onMessageTeachers?: (teacherIds: string[]) => void;
+  onMessageTeacher?: (teacher: TeacherData) => void;
   showToast?: (message: string, type?: 'success' | 'error') => void;
 }
 
@@ -49,7 +49,7 @@ const AdminTeachers: React.FC<AdminTeachersProps> = ({
   newTeacher, onNewTeacherChange, onCreateTeacher, onTeacherCreated,
   onViewStudents, onDeleteTeacher, onDeleteTeachers,
   editingTeacherId, onEditTeacher, onCancelEditTeacher,
-  onMessageTeachers, showToast,
+  onMessageTeacher, showToast,
 }) => {
 
   // ── Local UI state ──────────────────────────────────────────────────────────
@@ -78,7 +78,7 @@ const AdminTeachers: React.FC<AdminTeachersProps> = ({
   const [addingSectionGrade, setAddingSectionGrade] = useState<string | null>(null);
   const [newSectionCode, setNewSectionCode]     = useState('');
   const [vaultTeacher, setVaultTeacher]         = useState<TeacherData | null>(null);
-  const [credentialsModal, setCredentialsModal] = useState<{ username: string; password: string; name: string; whatsappSent?: boolean } | null>(null);
+  const [credentialsModal, setCredentialsModal] = useState<{ username: string; name: string; whatsappSent?: boolean } | null>(null);
 
   // ─── Phone Verification State (Teacher Registration) ────────────────────────
   const {
@@ -150,9 +150,9 @@ const AdminTeachers: React.FC<AdminTeachersProps> = ({
     try {
       const res = await fetch(`${API_BASE}/teachers/${id}/reset-password`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
       const data = await res.json();
-      if (data.success) showToast?.(`Password reset. New credentials sent to ${name}'s WhatsApp.`, 'success');
-      else showToast?.(data.message || 'Error resetting password.', 'error');
-    } catch { showToast?.(`Password reset for ${name} completed (offline mode).`, 'success'); }
+      if (data.success) showToast?.(`Password reset successfully and new credentials were sent to ${name}'s WhatsApp.`, 'success');
+      else showToast?.(data.message || 'WhatsApp message failed. Password was not changed.', 'error');
+    } catch { showToast?.('Network error. Password was not changed.', 'error'); }
   };
 
   const handleAddSection = async (grade: string, code: string) => {
@@ -185,7 +185,7 @@ const AdminTeachers: React.FC<AdminTeachersProps> = ({
       const data = await res.json();
       if (data.success) {
         showToast?.(`Teacher ${newTeacher.name} registered successfully.`, 'success');
-        if (data.credentials) setCredentialsModal({ name: newTeacher.name, username: data.credentials.employeeId || data.credentials.username, password: data.credentials.password, whatsappSent: !!data.credentials.whatsappSent });
+        if (data.credentials) setCredentialsModal({ name: newTeacher.name, username: data.credentials.employeeId || data.credentials.username, whatsappSent: !!data.credentials.whatsappSent });
         onTeacherCreated?.(); setShowAddDrawer(false);
       } else showToast?.(data.message || data.error || 'Error creating teacher.', 'error');
     } catch { showToast?.('Network error. Check connection.', 'error'); }
@@ -497,11 +497,6 @@ const AdminTeachers: React.FC<AdminTeachersProps> = ({
       {selectedIds.length > 0 && (
         <div className="flex items-center gap-3 px-4 py-2.5 bg-blue-lt border border-blue-200 rounded-lg">
           <span className="text-sm font-bold text-blue">{selectedIds.length} selected</span>
-          {onMessageTeachers && (
-            <button className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-md text-white" style={{ background: '#25D366' }} onClick={() => onMessageTeachers(selectedIds)}>
-              <MessageCircle size={13} /> WhatsApp
-            </button>
-          )}
           {onDeleteTeachers && (
             <Button variant="danger" size="sm" onClick={() => onDeleteTeachers(selectedIds)}><Trash2 size={13} /> Delete</Button>
           )}
@@ -621,8 +616,8 @@ const AdminTeachers: React.FC<AdminTeachersProps> = ({
                         <button className="w-8 h-8 flex items-center justify-center rounded-md border border-slate-200 dark:border-slate-600 text-blue hover:bg-blue-lt transition-colors" title="Documents Vault" onClick={() => handleOpenVault(t)}>
                           <FolderOpen size={16} />
                         </button>
-                        {onMessageTeachers && (
-                          <button className="w-8 h-8 flex items-center justify-center rounded-md border border-slate-200 dark:border-slate-600 text-green hover:bg-green-lt transition-colors" title="Send WhatsApp" onClick={() => onMessageTeachers([tId])}>
+                        {onMessageTeacher && (
+                          <button className="w-8 h-8 flex items-center justify-center rounded-md border border-slate-200 dark:border-slate-600 text-green hover:bg-green-lt transition-colors" title="Send WhatsApp" onClick={() => onMessageTeacher(t)}>
                             <MessageCircle size={16} />
                           </button>
                         )}
@@ -703,8 +698,8 @@ const AdminTeachers: React.FC<AdminTeachersProps> = ({
                       <Button size="sm" variant="secondary" onClick={() => handleOpenVault(t)}>
                         <FolderOpen size={13} /> Vault
                       </Button>
-                      {onMessageTeachers && (
-                        <Button size="sm" variant="success" onClick={() => onMessageTeachers([tId])}>
+                      {onMessageTeacher && (
+                        <Button size="sm" variant="success" onClick={() => onMessageTeacher(t)}>
                           <MessageCircle size={13} /> Message
                         </Button>
                       )}
@@ -764,27 +759,21 @@ const AdminTeachers: React.FC<AdminTeachersProps> = ({
 
       {/* ── CREDENTIALS MODAL ───────────────────────────────────────────────── */}
       <Modal isOpen={!!credentialsModal} onClose={() => setCredentialsModal(null)} title="🎉 Teacher Registered" maxWidth="480px"
-        footer={<Button className="w-full justify-center" onClick={() => setCredentialsModal(null)}><Check size={14} /> Done — Credentials Noted</Button>}>
+        footer={<Button className="w-full justify-center" onClick={() => setCredentialsModal(null)}><Check size={14} /> Done</Button>}>
         {credentialsModal && (
           <div className="flex flex-col gap-4">
             <p className="text-sm text-slate-600 dark:text-slate-400 dark:text-slate-500"><strong>{credentialsModal.name}</strong> can log in using the Employee Portal.</p>
             <div className={cn('flex items-center gap-2 px-3 py-2.5 rounded-md text-sm font-semibold border', credentialsModal.whatsappSent ? 'bg-green-50 border-green-200 text-green-800' : 'bg-amber-50 border-amber-200 text-amber-800')}>
-              {credentialsModal.whatsappSent ? '✅ Credentials sent via WhatsApp.' : '⚠️ WhatsApp blocked (sandbox). Share manually.'}
+              {credentialsModal.whatsappSent ? '✅ Credentials sent to the registered WhatsApp number.' : '⚠️ Account created, but WhatsApp delivery could not be queued.'}
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-blue-lt rounded-md p-3 border border-blue-200">
-                <div className="text-2xs font-bold uppercase text-slate-500 dark:text-slate-400 dark:text-slate-500 mb-1">Login ID (Employee ID)</div>
-                <div className="text-sm font-bold font-mono text-blue">{credentialsModal.username}</div>
-              </div>
-              <div className="bg-amber-lt rounded-md p-3 border border-amber-200">
-                <div className="text-2xs font-bold uppercase text-slate-500 dark:text-slate-400 dark:text-slate-500 mb-1">Temporary Password</div>
-                <div className="text-sm font-bold font-mono text-amber">{credentialsModal.password}</div>
-              </div>
+            <div className="bg-blue-lt rounded-md p-3 border border-blue-200">
+              <div className="text-2xs font-bold uppercase text-slate-500 dark:text-slate-400 dark:text-slate-500 mb-1">Login ID (Employee ID)</div>
+              <div className="text-sm font-bold font-mono text-blue">{credentialsModal.username}</div>
             </div>
             <div className="bg-green-50 border border-green-200 rounded-md p-3 text-xs text-green-800 leading-relaxed">
               <strong>📋 Instructions:</strong><br />
               1. Open login → Employee Portal<br />
-              2. Enter Employee ID + temporary password<br />
+              2. Enter Employee ID + the temporary password sent via WhatsApp<br />
               3. You will be prompted to set a new password on first login
             </div>
           </div>

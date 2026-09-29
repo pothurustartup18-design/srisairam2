@@ -35,7 +35,7 @@ describe('processNotificationJob — sendWhatsAppTemplate', () => {
         to: '918899582239',
         templateName: 'attendance_alert_full',
         languageCode: 'en',
-        named: { student_name_en: 'Harsha', student_name_te: 'Harsha' },
+        bodyParameters: { student_name_en: 'Harsha', student_name_te: 'Harsha' },
         dedupeKey: 'attendance:2026-09-06:stu1:full'
       }
     });
@@ -57,7 +57,7 @@ describe('processNotificationJob — sendWhatsAppTemplate', () => {
         to: '918899582239',
         templateName: 'fee_receipt',
         languageCode: 'en',
-        named: { amount_en: '986' },
+        bodyParameters: { amount_en: '986' },
         dedupeKey: 'fee-receipt:FEE-1',
         header: { type: 'document', link: 'https://s3/r.pdf', filename: 'receipt_FEE-1.pdf' }
       }
@@ -74,6 +74,28 @@ describe('processNotificationJob — sendWhatsAppTemplate', () => {
     );
   });
 
+  it('forwards a positional OTP template (o_auth) with otpButtonCode', async () => {
+    await processNotificationJob({
+      id: 'j-otp',
+      name: 'sendWhatsAppTemplate',
+      data: {
+        to: '918899582239',
+        templateName: 'o_auth',
+        languageCode: 'en',
+        bodyParameters: ['482913'],
+        otpButtonCode: '482913',
+        dedupeKey: 'otp:auth.otp:918899582239:482913'
+      }
+    });
+    expect(templateMock).toHaveBeenCalledWith(
+      '918899582239',
+      'o_auth',
+      'en',
+      ['482913'],
+      { dedupeKey: 'otp:auth.otp:918899582239:482913', otpButtonCode: '482913' }
+    );
+  });
+
   it('THROWS (BullMQ retries) for a TRANSIENT failure (retryable !== false)', async () => {
     templateMock.mockResolvedValueOnce({
       success: false,
@@ -83,7 +105,7 @@ describe('processNotificationJob — sendWhatsAppTemplate', () => {
       processNotificationJob({
         id: 'j2',
         name: 'sendWhatsAppTemplate',
-        data: { to: '918899582239', templateName: 'attendance_alert_full', languageCode: 'en', named: {} }
+        data: { to: '918899582239', templateName: 'attendance_alert_full', languageCode: 'en', bodyParameters: {} }
       })
     ).rejects.toThrow(/transient/i);
   });
@@ -106,7 +128,7 @@ describe('processNotificationJob — sendWhatsAppTemplate', () => {
       processNotificationJob({
         id: 'j-perm',
         name: 'sendWhatsAppTemplate',
-        data: { to: '918899582239', templateName: 'installment_reminder', languageCode: 'en', named: {} }
+        data: { to: '918899582239', templateName: 'installment_reminder', languageCode: 'en', bodyParameters: {} }
       })
     ).resolves.toBeUndefined(); // completes — NOT retried
 

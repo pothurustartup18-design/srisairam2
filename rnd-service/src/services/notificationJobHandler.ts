@@ -88,10 +88,11 @@ export async function processNotificationJob(job: NotificationJob): Promise<void
       const { to, resolved } = job.data;
       handleSendResult(await dispatchResolvedDelivery(to, resolved), { job: job.id, kind: 'resolved', to });
     } else if (job.name === 'sendWhatsAppTemplate') {
-      const { to, templateName, languageCode, named, dedupeKey, header } = job.data;
-      const result = await sendWhatsAppTemplate(to, templateName, languageCode, named || {}, {
+      const { to, templateName, languageCode, bodyParameters, otpButtonCode, dedupeKey, header } = job.data;
+      const result = await sendWhatsAppTemplate(to, templateName, languageCode, bodyParameters || {}, {
         dedupeKey,
-        ...(header ? { templateHeader: header } : {})
+        ...(header ? { templateHeader: header } : {}),
+        ...(otpButtonCode ? { otpButtonCode } : {})
       });
       handleSendResult(result, { job: job.id, kind: 'template', to, templateName });
     } else {

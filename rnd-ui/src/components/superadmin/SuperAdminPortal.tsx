@@ -89,6 +89,31 @@ interface ConfigEntry {
   updatedAt?: string;
 }
 
+interface WhatsAppTemplateBreakdown {
+  templateName: string;
+  category: 'UTILITY' | 'MARKETING' | 'OTHER';
+  count: number;
+}
+
+interface WhatsAppCategoryInsight {
+  category: 'UTILITY' | 'MARKETING';
+  templates: WhatsAppTemplateBreakdown[];
+  totalCount: number;
+  basePrice: number;
+  markupPercent: number;
+  unitPrice: number;
+  estimatedCost: number;
+}
+
+interface WhatsAppInsightsData {
+  generatedAt: string;
+  billingResetAt?: string | null;
+  totalMessages: number;
+  byStatus: Record<string, number>;
+  categories: WhatsAppCategoryInsight[];
+  uncategorized: { totalCount: number; templates: WhatsAppTemplateBreakdown[] };
+}
+
 const formatUptime = (totalSeconds: number): string => {
   const days = Math.floor(totalSeconds / 86400);
   const hours = Math.floor((totalSeconds % 86400) / 3600);
@@ -169,6 +194,18 @@ const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({ user, onLogout }) =
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
   const [clearingLogs, setClearingLogs] = useState(false);
+
+  const [insightsEnabled, setInsightsEnabled] = useState(false);
+  const [insightsToggleLoaded, setInsightsToggleLoaded] = useState(false);
+  const [togglingInsights, setTogglingInsights] = useState(false);
+  const [insightsData, setInsightsData] = useState<WhatsAppInsightsData | null>(null);
+  const [loadingInsights, setLoadingInsights] = useState(false);
+
+  // Markup & Billing Reset State
+  const [utilityMarkupInput, setUtilityMarkupInput] = useState<string>('70');
+  const [marketingMarkupInput, setMarketingMarkupInput] = useState<string>('30');
+  const [savingMarkup, setSavingMarkup] = useState(false);
+  const [resettingBilling, setResettingBilling] = useState(false);
 
   const authHeaders = (): HeadersInit => {
     const token = localStorage.getItem('schoolhub_access_token');
@@ -298,6 +335,113 @@ const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({ user, onLogout }) =
     }
   };
 
+  const fetchInsightsToggle = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/settings/whatsapp-insights/toggle`, { headers: authHeaders() });
+      const data = await res.json();
+      if (data.success) {
+        setInsightsEnabled(!!data.enabled);
+      }
+    } catch (err) {
+      console.error('Failed to fetch WhatsApp insights toggle:', err);
+    } finally {
+      setInsightsToggleLoaded(true);
+    }
+  };
+
+  const fetchInsights = async () => {
+    setLoadingInsights(true);
+    try {
+      const res = await fetch(`${API_BASE}/settings/whatsapp-insights`, { headers: authHeaders() });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setInsightsData(data.data);
+        const uCat = data.data.categories?.find((c: any) => c.category === 'UTILITY');
+        const mCat = data.data.categories?.find((c: any) => c.category === 'MARKETING');
+        if (uCat && uCat.markupPercent !== undefined) setUtilityMarkupInput(String(uCat.markupPercent));
+        if (mCat && mCat.markupPercent !== undefined) setMarketingMarkupInput(String(mCat.markupPercent));
+      }
+    } catch (err) {
+      console.error('Failed to fetch WhatsApp insights:', err);
+    } finally {
+      setLoadingInsights(false);
+    }
+  };
+
+  const handleSaveMarkup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingMarkup(true);
+    try {
+      const uVal = Number(utilityMarkupInput);
+      const mVal = Number(marketingMarkupInput);
+      if (isNaN(uVal) || uVal < 0 || isNaN(mVal) || mVal < 0) {
+        alert('Please enter valid positive markup percentages.');
+        return;
+      }
+      const res = await fetch(`${API_BASE}/settings/whatsapp-insights/pricing`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ utilityMarkupPercent: uVal, marketingMarkupPercent: mVal })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Failed to update markup percentage.');
+      }
+      setInsightsData(data.data);
+      alert('WhatsApp markup percentage updated successfully. Future messages will be calculated with the new markup, while previously sent messages retain their recorded pricing.');
+    } catch (err: any) {
+      alert(err.message || 'Error updating markup.');
+    } finally {
+      setSavingMarkup(false);
+    }
+  };
+
+  const handleResetBillingCycle = async () => {
+    if (!window.confirm('Are you sure you want to reset the billing cycle?\n\nThis will clear active message counts and billing amounts back to 0. (Useful once the school admin has paid their bill).')) {
+      return;
+    }
+    setResettingBilling(true);
+    try {
+      const res = await fetch(`${API_BASE}/settings/whatsapp-insights/reset-billing`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() }
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Failed to reset billing cycle.');
+      }
+      setInsightsData(data.data);
+      alert('Billing cycle has been reset. Active message counts and billing totals are now starting from 0.');
+    } catch (err: any) {
+      alert(err.message || 'Error resetting billing cycle.');
+    } finally {
+      setResettingBilling(false);
+    }
+  };
+
+  const handleToggleInsights = async () => {
+    const newValue = !insightsEnabled;
+    setInsightsEnabled(newValue);
+    setTogglingInsights(true);
+    try {
+      const res = await fetch(`${API_BASE}/settings/whatsapp-insights/toggle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ enabled: newValue })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Failed to update insights setting.');
+      }
+      if (newValue) fetchInsights();
+    } catch (err: any) {
+      alert(err.message || 'Error updating WhatsApp Insights setting.');
+      setInsightsEnabled(!newValue);
+    } finally {
+      setTogglingInsights(false);
+    }
+  };
+
   useEffect(() => {
     fetchWhatsappQuota();
     const quotaInterval = setInterval(fetchWhatsappQuota, 30000);
@@ -315,6 +459,7 @@ const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({ user, onLogout }) =
       fetchStats();
     } else if (activeTab === 'whatsapp') {
       fetchSimulatedMessages();
+      fetchInsightsToggle();
     } else if (activeTab === 'audit') {
       fetchAuditLogs(1);
     } else if (activeTab === 'sessions') {
@@ -323,6 +468,12 @@ const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({ user, onLogout }) =
       fetchAllConfigs();
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'whatsapp' && insightsToggleLoaded && insightsEnabled && !insightsData) {
+      fetchInsights();
+    }
+  }, [activeTab, insightsToggleLoaded, insightsEnabled]);
 
   const handleUpdateWhatsappLimit = async () => {
     setUpdatingLimit(true);
@@ -670,6 +821,8 @@ const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({ user, onLogout }) =
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
+
+  const formatInr = (amount: number): string => `₹${(amount || 0).toFixed(2)}`;
 
   const filteredMessages = (simulatedMessages || []).filter(msg => {
     if (!msg) return false;
@@ -1144,6 +1297,227 @@ const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({ user, onLogout }) =
           {/* Tab Content: WhatsApp Simulation */}
           {activeTab === 'whatsapp' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              {/* WhatsApp Insights toggle — always visible; the table/report below only
+                  renders once the superadmin turns this on. Off by default. */}
+              <div style={{ backgroundColor: '#1e293b', borderRadius: '12px', padding: '16px 24px', border: '1px solid #334155', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 600 }}>WhatsApp Insights</span>
+                  <span style={{ fontSize: '11px', color: '#94a3b8' }}>Message counts by type/category with estimated pricing (Utility +70%, Marketing/Events +30%)</span>
+                </div>
+                <label style={{ position: 'relative', display: 'inline-block', width: '40px', height: '22px', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={insightsEnabled}
+                    disabled={togglingInsights}
+                    onChange={handleToggleInsights}
+                    style={{ opacity: 0, width: 0, height: 0 }}
+                  />
+                  <span style={{
+                    position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: insightsEnabled ? '#4f46e5' : '#475569',
+                    borderRadius: '34px', transition: '0.4s'
+                  }}>
+                    <span style={{
+                      position: 'absolute', content: '""', height: '16px', width: '16px', left: insightsEnabled ? '21px' : '3px', bottom: '3px',
+                      backgroundColor: 'white', borderRadius: '50%', transition: '0.4s'
+                    }} />
+                  </span>
+                </label>
+              </div>
+
+              {insightsEnabled && (
+                <div style={{ backgroundColor: '#1e293b', borderRadius: '12px', padding: '24px', border: '1px solid #334155', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <MessageCircle className="w-6 h-6 text-indigo-400" />
+                      <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>WhatsApp Message Insights</h4>
+                    </div>
+                    <button
+                      onClick={fetchInsights}
+                      style={{ backgroundColor: '#334155', border: 'none', borderRadius: '6px', color: '#f8fafc', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}
+                    >
+                      <RefreshCw className={`w-4 h-4 ${loadingInsights ? 'animate-spin' : ''}`} />
+                      <span>Reload</span>
+                    </button>
+                  </div>
+
+                  {!insightsData ? (
+                    <p style={{ margin: 0, color: '#64748b', fontSize: '13px' }}>{loadingInsights ? 'Loading insights...' : 'No data yet.'}</p>
+                  ) : (
+                    <>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px' }}>
+                        <div style={{ backgroundColor: '#0f172a', borderRadius: '8px', padding: '12px 16px' }}>
+                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>Total Messages</div>
+                          <div style={{ fontSize: '20px', fontWeight: 700 }}>{insightsData.totalMessages}</div>
+                        </div>
+                        {Object.entries(insightsData.byStatus).map(([status, count]) => (
+                          <div key={status} style={{ backgroundColor: '#0f172a', borderRadius: '8px', padding: '12px 16px' }}>
+                            <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'capitalize' }}>{status}</div>
+                            <div style={{ fontSize: '20px', fontWeight: 700 }}>{count}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Controls Bar: Markup Percentages & Billing Cycle Reset */}
+                      <div style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        flexWrap: 'wrap', gap: '16px', backgroundColor: '#0f172a', borderRadius: '8px',
+                        padding: '16px', border: '1px solid #334155'
+                      }}>
+                        {/* Markup Form */}
+                        <form onSubmit={handleSaveMarkup} style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <label style={{ fontSize: '12px', color: '#a5b4fc', fontWeight: 600 }}>Utility Markup:</label>
+                            <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+                              <input
+                                type="number"
+                                min="0"
+                                max="1000"
+                                step="1"
+                                value={utilityMarkupInput}
+                                onChange={(e) => setUtilityMarkupInput(e.target.value)}
+                                style={{
+                                  width: '75px', backgroundColor: '#1e293b', border: '1px solid #475569',
+                                  borderRadius: '6px', padding: '5px 8px', color: 'white', fontSize: '13px',
+                                  fontWeight: 600, textAlign: 'right'
+                                }}
+                              />
+                              <span style={{ marginLeft: '4px', fontSize: '12px', color: '#94a3b8' }}>%</span>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <label style={{ fontSize: '12px', color: '#f59e0b', fontWeight: 600 }}>Marketing Markup:</label>
+                            <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+                              <input
+                                type="number"
+                                min="0"
+                                max="1000"
+                                step="1"
+                                value={marketingMarkupInput}
+                                onChange={(e) => setMarketingMarkupInput(e.target.value)}
+                                style={{
+                                  width: '75px', backgroundColor: '#1e293b', border: '1px solid #475569',
+                                  borderRadius: '6px', padding: '5px 8px', color: 'white', fontSize: '13px',
+                                  fontWeight: 600, textAlign: 'right'
+                                }}
+                              />
+                              <span style={{ marginLeft: '4px', fontSize: '12px', color: '#94a3b8' }}>%</span>
+                            </div>
+                          </div>
+
+                          <button
+                            type="submit"
+                            disabled={savingMarkup}
+                            style={{
+                              backgroundColor: '#4f46e5', color: 'white', border: 'none', borderRadius: '6px',
+                              padding: '6px 14px', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+                              display: 'flex', alignItems: 'center', gap: '6px', opacity: savingMarkup ? 0.7 : 1
+                            }}
+                          >
+                            {savingMarkup ? 'Saving...' : 'Update Markup'}
+                          </button>
+                        </form>
+
+                        {/* Reset Billing Cycle Button */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                          {insightsData.billingResetAt && (
+                            <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+                              Cycle since: {new Date(insightsData.billingResetAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={handleResetBillingCycle}
+                            disabled={resettingBilling}
+                            style={{
+                              backgroundColor: '#dc2626', color: 'white', border: 'none', borderRadius: '6px',
+                              padding: '6px 14px', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+                              display: 'flex', alignItems: 'center', gap: '6px', opacity: resettingBilling ? 0.7 : 1
+                            }}
+                          >
+                            <Trash2 style={{ width: '13px', height: '13px' }} />
+                            <span>{resettingBilling ? 'Resetting...' : 'Clear Messages & Amount (Paid)'}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <p style={{ margin: 0, fontSize: '11px', color: '#64748b' }}>
+                        Base per-conversation rates are estimates (Meta does not expose live billing data for this WhatsApp Business Account).
+                        Changing markup applies to newly sent messages while preserving past charges.
+                      </p>
+
+                      <div style={{ overflowX: 'auto', border: '1px solid #334155', borderRadius: '8px' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                          <thead>
+                            <tr style={{ backgroundColor: '#0f172a', borderBottom: '1px solid #334155' }}>
+                              <th style={{ padding: '12px 16px', color: '#94a3b8' }}>Category</th>
+                              <th style={{ padding: '12px 16px', color: '#94a3b8' }}>Template</th>
+                              <th style={{ padding: '12px 16px', color: '#94a3b8' }}>Count</th>
+                              <th style={{ padding: '12px 16px', color: '#94a3b8' }}>Base Price</th>
+                              <th style={{ padding: '12px 16px', color: '#94a3b8' }}>Markup</th>
+                              <th style={{ padding: '12px 16px', color: '#94a3b8' }}>Unit Price</th>
+                              <th style={{ padding: '12px 16px', color: '#94a3b8' }}>Est. Cost</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {insightsData.categories.flatMap((cat) =>
+                              cat.templates.length === 0
+                                ? []
+                                : cat.templates.map((tpl, idx) => (
+                                    <tr key={`${cat.category}-${tpl.templateName}`} style={{ borderBottom: '1px solid #334155' }}>
+                                      {idx === 0 && (
+                                        <td rowSpan={cat.templates.length} style={{ padding: '12px 16px', verticalAlign: 'top' }}>
+                                          <span style={{
+                                            fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '4px',
+                                            backgroundColor: cat.category === 'UTILITY' ? '#4f46e51a' : '#f59e0b1a',
+                                            color: cat.category === 'UTILITY' ? '#a5b4fc' : '#f59e0b'
+                                          }}>
+                                            {cat.category}
+                                          </span>
+                                        </td>
+                                      )}
+                                      <td style={{ padding: '12px 16px' }}>
+                                        <code style={{ backgroundColor: '#0f172a', padding: '2px 6px', borderRadius: '4px', color: '#c7d2fe' }}>{tpl.templateName}</code>
+                                      </td>
+                                      <td style={{ padding: '12px 16px', fontWeight: 600 }}>{tpl.count}</td>
+                                      {idx === 0 && (
+                                        <>
+                                          <td rowSpan={cat.templates.length} style={{ padding: '12px 16px', verticalAlign: 'top', color: '#94a3b8' }}>{formatInr(cat.basePrice)}</td>
+                                          <td rowSpan={cat.templates.length} style={{ padding: '12px 16px', verticalAlign: 'top', color: '#34d399', fontWeight: 600 }}>+{cat.markupPercent}%</td>
+                                          <td rowSpan={cat.templates.length} style={{ padding: '12px 16px', verticalAlign: 'top', fontWeight: 600 }}>{formatInr(cat.unitPrice)}</td>
+                                          <td rowSpan={cat.templates.length} style={{ padding: '12px 16px', verticalAlign: 'top', fontWeight: 700 }}>{formatInr(cat.estimatedCost)}</td>
+                                        </>
+                                      )}
+                                    </tr>
+                                  ))
+                            )}
+                            {insightsData.uncategorized.totalCount > 0 && insightsData.uncategorized.templates.map((tpl, idx) => (
+                              <tr key={`other-${tpl.templateName}`} style={{ borderBottom: '1px solid #334155' }}>
+                                {idx === 0 && (
+                                  <td rowSpan={insightsData.uncategorized.templates.length} style={{ padding: '12px 16px', verticalAlign: 'top' }}>
+                                    <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '4px', backgroundColor: '#33415533', color: '#94a3b8' }}>OTHER</span>
+                                  </td>
+                                )}
+                                <td style={{ padding: '12px 16px' }}>
+                                  <code style={{ backgroundColor: '#0f172a', padding: '2px 6px', borderRadius: '4px', color: '#c7d2fe' }}>{tpl.templateName}</code>
+                                </td>
+                                <td style={{ padding: '12px 16px', fontWeight: 600 }}>{tpl.count}</td>
+                                {idx === 0 && (
+                                  <td colSpan={4} rowSpan={insightsData.uncategorized.templates.length} style={{ padding: '12px 16px', verticalAlign: 'top', color: '#64748b', fontSize: '12px' }}>
+                                    Free-form / no template — not billed as a category conversation.
+                                  </td>
+                                )}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '24px' }}>
                 {/* Quota Management Card */}
                 <div style={{ backgroundColor: '#1e293b', borderRadius: '12px', padding: '24px', border: '1px solid #334155', display: 'flex', flexDirection: 'column', gap: '16px' }}>

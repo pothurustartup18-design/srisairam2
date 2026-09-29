@@ -53,13 +53,29 @@
  *   transport_bus_alert          en  APPROVED  UTILITY    NAMED  BODY only
  *       Verified against Meta 2026-09-22. body params: message, school_name.
  *       No HEADER, so no media can ride along — text only.
+ *   o_auth                       en  ACTIVE (quality pending)  AUTHENTICATION  POSITIONAL  BODY + BUTTON
+ *       Verified via WhatsApp Manager UI on 2026-09-29. Meta's stock
+ *       authentication body: "{{1}} is your verification code. For your
+ *       security, do not share this code." with a single positional param
+ *       (the code) plus a "Copy code" OTP button. Authentication templates
+ *       never take NAMED params and always carry the code again in a BUTTON
+ *       component (Cloud API: button sub_type "copy_code", parameter type
+ *       "coupon_code") — see `parameterFormat`/`otpButton` below.
+ *   staff_credentials_new        en  APPROVED  (category not yet confirmed —
+ *       treated as UTILITY here for billing only; verify in WhatsApp Manager)
+ *       Verified via WhatsApp Manager UI on 2026-09-29. NAMED, no header.
+ *       body params: name_en, employee_id_en, temporary_password_en,
+ *                    name_te, employee_id_te, temporary_password_te
+ *   staff_credentials_reset      en  APPROVED  (category not yet confirmed —
+ *       treated as UTILITY here for billing only; verify in WhatsApp Manager)
+ *       Verified via WhatsApp Manager UI on 2026-09-29. NAMED, no header.
+ *       body params: username_en, password_en, username_te, password_te
  *
  * Every approved body text already contains BOTH the English and Telugu
  * sentences (where bilingual), so ONE template send covers both languages
  * regardless of student.preferredLanguage.
  *
  * NOT registered (deliberately):
- *   - staff_credentials_new / staff_credentials_reset — REJECTED by Meta
  *   - hello_world — Meta's sample template, never a production notification
  *   - school_notification — PENDING (not APPROVED); must not be used as a live
  *     fallback (see WHATSAPP_FALLBACK_ENABLED in config/whatsapp.ts)
@@ -73,18 +89,32 @@ export interface RegisteredTemplate {
   /** Exact Meta-approved language code for this template version. */
   language: string;
   /** Meta category, for documentation/observability only. */
-  category: 'attendance' | 'fees' | 'reports' | 'announcements' | 'transport';
+  category: 'attendance' | 'fees' | 'reports' | 'announcements' | 'transport' | 'authentication' | 'staff';
   /**
-   * Ordered named body parameters, exactly as approved
-   * (the template's parameter_format is NAMED — these are `parameter_name`s,
-   * never positional indexes).
+   * Ordered body parameters, exactly as approved. For `parameterFormat: 'named'`
+   * (the default — every template except `auth.otp`) these are `parameter_name`s.
+   * For `parameterFormat: 'positional'` this is the ORDER of positional slots
+   * ({{1}}, {{2}}, …); the keys are internal-only and never sent to Meta.
    */
   parameters: readonly string[];
+  /**
+   * Meta's Cloud API body format for this template. Defaults to 'named'.
+   * AUTHENTICATION-category templates are always 'positional' — Meta rejects
+   * `parameter_name` on them.
+   */
+  parameterFormat?: 'named' | 'positional';
   /**
    * Set when the approved template has a media HEADER component. The caller must
    * then supply header media (see queueTemplateNotification `headerDocument`).
    */
   header?: { type: TemplateHeaderType };
+  /**
+   * Set for AUTHENTICATION templates with a "Copy code" / one-tap-autofill
+   * button. The Cloud API requires the OTP value a second time in a dedicated
+   * BUTTON component (sub_type "copy_code") alongside the BODY parameter.
+   * Only meaningful when there is exactly one body parameter (the code).
+   */
+  otpButton?: boolean;
 }
 
 const ATTENDANCE_PARAMS = ['student_name_en', 'student_name_te'] as const;
@@ -201,6 +231,34 @@ export const WHATSAPP_TEMPLATES = {
     language: 'en',
     category: 'transport',
     parameters: ['message', 'school_name']
+  },
+  'auth.otp': {
+    metaName: 'o_auth',
+    language: 'en',
+    category: 'authentication',
+    parameterFormat: 'positional',
+    otpButton: true,
+    // Single positional slot ({{1}}) — the OTP code. Key name is internal only.
+    parameters: ['code']
+  },
+  'staff.credentials_new': {
+    metaName: 'staff_credentials_new',
+    language: 'en',
+    category: 'staff',
+    parameters: [
+      'name_en',
+      'employee_id_en',
+      'temporary_password_en',
+      'name_te',
+      'employee_id_te',
+      'temporary_password_te'
+    ]
+  },
+  'staff.credentials_reset': {
+    metaName: 'staff_credentials_reset',
+    language: 'en',
+    category: 'staff',
+    parameters: ['username_en', 'password_en', 'username_te', 'password_te']
   }
 } as const satisfies Record<string, RegisteredTemplate>;
 
@@ -215,16 +273,11 @@ export function getRegisteredTemplate(key: string): RegisteredTemplate | undefin
  * exists. Per policy these MUST NOT be sent as free-form WhatsApp (Meta rejects
  * proactive free-form outside the 24h window anyway). Each entry names the
  * template that needs to be created + approved in WhatsApp Manager.
+ *
+ * Empty as of 2026-09-29 — `o_auth`, `staff_credentials_new` and
+ * `staff_credentials_reset` are now APPROVED and registered above.
  */
-export const MISSING_TEMPLATES = {
-  'staff.credentials':
-    'Staff onboarding / password-reset credentials. staff_credentials_new and staff_credentials_reset are ' +
-    'REJECTED by Meta; school_notification is PENDING. Needs new approved templates before any WhatsApp delivery.',
-  'auth.otp':
-    'Password-reset / phone-verification / profile-update OTP. Should use a Meta AUTHENTICATION-category ' +
-    'template (e.g. otp_code with one {code} param + copy-code button). Currently sent free-form — allowed ' +
-    'as an OTP exception, but delivery is unreliable to numbers outside an open conversation.'
-} as const;
+export const MISSING_TEMPLATES = {} as const;
 
 export interface ResolvedTemplateMessage {
   /** Registry key, e.g. "attendance.full". */
@@ -234,10 +287,16 @@ export interface ResolvedTemplateMessage {
   /** Meta language code to send. */
   language: string;
   /**
-   * parameter_name -> text, ordered to match the approved template. This maps
-   * directly onto the Cloud API `components[].parameters[]` with `parameter_name`.
+   * parameter_name -> text, ordered to match the approved template. For a
+   * 'positional' template this is still keyed by the registry's internal
+   * parameter names — the caller converts it to an ordered array using
+   * `parameters` order (see queueTemplateNotification).
    */
   named: Record<string, string>;
+  /** Meta's Cloud API body format for this template. */
+  parameterFormat: 'named' | 'positional';
+  /** Whether this template needs a "Copy code" BUTTON component (see RegisteredTemplate.otpButton). */
+  otpButton: boolean;
   /** The media HEADER this template requires, if any. */
   header?: { type: TemplateHeaderType };
 }
@@ -284,6 +343,14 @@ export function resolveTemplateMessage(key: string, params: Record<string, unkno
 
   return {
     ok: true,
-    message: { key, metaName: def.metaName, language: def.language, named, header: def.header }
+    message: {
+      key,
+      metaName: def.metaName,
+      language: def.language,
+      named,
+      parameterFormat: def.parameterFormat ?? 'named',
+      otpButton: def.otpButton ?? false,
+      header: def.header
+    }
   };
 }

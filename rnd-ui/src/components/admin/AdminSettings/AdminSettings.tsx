@@ -67,7 +67,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
   const [deletingEvents, setDeletingEvents] = useState(false);
   const [attendanceMode, setAttendanceMode] = useState<'full' | 'half-day'>('full');
 
-  const [viewMode, setViewMode] = useState<'menu' | 'sizing' | 'sync' | 'backups' | 'admin' | 'permissions' | 'feeStructures' | 'collections' | 'auditLogs' | 'schoolProfile' | 'principalSignature'>(initialViewMode);
+  const [viewMode, setViewMode] = useState<'menu' | 'sizing' | 'sync' | 'backups' | 'admin' | 'permissions' | 'feeStructures' | 'collections' | 'auditLogs' | 'schoolProfile' | 'principalSignature' | 'whatsappUsage'>(initialViewMode);
 
   // Create Admin Form State
   const [newAdmin, setNewAdmin] = useState({
@@ -85,7 +85,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
   const [currentAdminPassword, setCurrentAdminPassword] = useState('');
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [submittingAdmin, setSubmittingAdmin] = useState(false);
-  const [credentialsModal, setCredentialsModal] = useState<{ name: string; username: string; password: string; whatsappSent?: boolean } | null>(null);
+  const [credentialsModal, setCredentialsModal] = useState<{ name: string; username: string; whatsappSent?: boolean } | null>(null);
 
   // Employee/Custom User Management State
   const [employees, setEmployees] = useState<any[]>([]);
@@ -430,7 +430,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
   }, [viewMode, collectionsDate]);
 
 
-  // â”€â”€â”€ Audit Log State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Audit Log State ──────────────────────────────────────────────────────────
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [auditTotal, setAuditTotal] = useState(0);
   const [auditPage, setAuditPage] = useState(1);
@@ -463,6 +463,57 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
     if (viewMode === 'auditLogs') fetchAuditLogs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewMode, auditPage]);
+
+  // ─── WhatsApp Insights State ────────────────────────────────────────────────
+  const [whatsappInsightsEnabled, setWhatsappInsightsEnabled] = useState(false);
+  const [whatsappInsightsData, setWhatsappInsightsData] = useState<any | null>(null);
+  const [loadingWhatsappInsights, setLoadingWhatsappInsights] = useState(false);
+
+  const checkWhatsAppInsightsToggle = async () => {
+    try {
+      const token = getAccessToken();
+      const headers: HeadersInit = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch(`${API_BASE}/settings/whatsapp-insights/toggle`, { headers });
+      const data = await res.json();
+      if (data.success && data.enabled) {
+        setWhatsappInsightsEnabled(true);
+      } else {
+        setWhatsappInsightsEnabled(false);
+      }
+    } catch (err) {
+      console.error('Failed to check whatsapp insights toggle:', err);
+    }
+  };
+
+  const fetchWhatsAppInsights = async () => {
+    setLoadingWhatsappInsights(true);
+    try {
+      const token = getAccessToken();
+      const headers: HeadersInit = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch(`${API_BASE}/settings/whatsapp-insights/admin-summary`, { headers });
+      const data = await res.json();
+      if (data.success) {
+        setWhatsappInsightsData(data.data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch whatsapp insights:', err);
+    } finally {
+      setLoadingWhatsappInsights(false);
+    }
+  };
+
+  useEffect(() => {
+    checkWhatsAppInsightsToggle();
+  }, []);
+
+  useEffect(() => {
+    if (viewMode === 'whatsappUsage') {
+      fetchWhatsAppInsights();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode]);
 
   const settingsOptions = [
     {
@@ -534,7 +585,14 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
       description: 'Review a trail of sensitive actions taken across the system by staff accounts.',
       icon: ScrollText,
       colorClass: 'sizing-icon-bg'
-    }
+    },
+    ...(whatsappInsightsEnabled ? [{
+      id: 'whatsappUsage' as const,
+      title: 'WhatsApp Insights',
+      description: 'Review total messages sent, message category breakdown (Utility, Marketing), and total billing.',
+      icon: MessageCircle,
+      colorClass: 'permissions-icon-bg'
+    }] : [])
   ];
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -1033,7 +1091,6 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
           setCredentialsModal({
             name: `${newAdmin.firstName} ${newAdmin.lastName}`.trim(),
             username: resData.credentials.username,
-            password: resData.credentials.password,
             whatsappSent: !!resData.credentials.whatsappSent
           });
         }
@@ -1303,6 +1360,7 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
                   {viewMode === 'feeStructures' && 'Class Fee Structures'}
                   {viewMode === 'collections' && 'Daily Fee Collections'}
                   {viewMode === 'auditLogs' && 'Audit Log'}
+                  {viewMode === 'whatsappUsage' && 'WhatsApp Message Insights'}
                 </h2>
                 <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
                   {viewMode === 'sizing' && 'Detailed database records capacity, storage sizing, and AWS S3 telemetry.'}
@@ -1310,7 +1368,8 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
                   {viewMode === 'backups' && 'Safely export student datasets in CSV format or zip complete media archives.'}
                   {viewMode === 'feeStructures' && 'Define default total fee, books fee, and installment due dates per class.'}
                   {viewMode === 'collections' && 'Fee payments recorded on a chosen date, broken down by payment mode.'}
-                  {viewMode === 'auditLogs' && 'A trail of sensitive actions â€” payments, deletions, config changes â€” with who did what and when.'}
+                  {viewMode === 'auditLogs' && 'A trail of sensitive actions — payments, deletions, config changes — with who did what and when.'}
+                  {viewMode === 'whatsappUsage' && 'Review total messages dispatched, categorized by Utility and Marketing with total usage costs.'}
                 </p>
               </div>
             )}
@@ -2558,6 +2617,187 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
             </div>
           )}
 
+          {/* WhatsApp Insights Tab */}
+          {viewMode === 'whatsappUsage' && (
+            <div className="animate-fade-in flex flex-col gap-5">
+              {/* Card Container */}
+              <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden p-5 sm:p-6 flex flex-col gap-6">
+                
+                {/* Header with reload */}
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950 flex items-center justify-center flex-shrink-0">
+                      <MessageCircle className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">WhatsApp Message Insights</h3>
+                      <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Aggregated dispatch metrics and category-level total billing.</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={fetchWhatsAppInsights}
+                    disabled={loadingWhatsappInsights}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors shadow-sm cursor-pointer"
+                  >
+                    <RefreshCw className={cn("w-3.5 h-3.5", loadingWhatsappInsights && "animate-spin")} />
+                    <span>Reload</span>
+                  </button>
+                </div>
+
+                {loadingWhatsappInsights ? (
+                  <div className="flex flex-col items-center justify-center gap-3 py-16">
+                    <RefreshCw size={24} className="animate-spin text-indigo-500" />
+                    <span className="text-sm text-slate-400 dark:text-slate-500 font-medium">Loading WhatsApp insights...</span>
+                  </div>
+                ) : !whatsappInsightsData ? (
+                  <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+                    <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center">
+                      <MessageCircle size={22} className="text-slate-400 dark:text-slate-500" />
+                    </div>
+                    <div>
+                      <div className="text-sm font-semibold text-slate-600 dark:text-slate-300">No WhatsApp insights data available</div>
+                      <div className="text-xs text-slate-400 mt-1">Make sure WhatsApp messages have been sent and insights are enabled.</div>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {/* Stat KPI Cards Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      {/* Total Messages */}
+                      <div className="p-4 rounded-xl border border-slate-100 dark:border-slate-700/60 bg-slate-50/50 dark:bg-slate-900/50 flex flex-col justify-between">
+                        <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Total Messages</div>
+                        <div className="text-2xl font-black text-slate-900 dark:text-white mt-2">{whatsappInsightsData.totalMessages || 0}</div>
+                        <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">All processed dispatches</div>
+                      </div>
+
+                      {/* Sent */}
+                      <div className="p-4 rounded-xl border border-emerald-100 dark:border-emerald-950/40 bg-emerald-50/30 dark:bg-emerald-950/20 flex flex-col justify-between">
+                        <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider">Sent / Delivered</div>
+                        <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-2">
+                          {(whatsappInsightsData.byStatus?.sent || 0) + (whatsappInsightsData.byStatus?.delivered || 0) + (whatsappInsightsData.byStatus?.read || 0)}
+                        </div>
+                        <div className="text-[11px] text-emerald-600/70 dark:text-emerald-400/70 mt-1">Successfully dispatched</div>
+                      </div>
+
+                      {/* Failed */}
+                      <div className="p-4 rounded-xl border border-rose-100 dark:border-rose-950/40 bg-rose-50/30 dark:bg-rose-950/20 flex flex-col justify-between">
+                        <div className="text-xs font-semibold text-rose-700 dark:text-rose-400 uppercase tracking-wider">Failed</div>
+                        <div className="text-2xl font-black text-rose-600 dark:text-rose-400 mt-2">
+                          {whatsappInsightsData.byStatus?.failed || 0}
+                        </div>
+                        <div className="text-[11px] text-rose-600/70 dark:text-rose-400/70 mt-1">Delivery errors or rejected</div>
+                      </div>
+
+                      {/* Total Cost */}
+                      <div className="p-4 rounded-xl border border-indigo-100 dark:border-indigo-950/40 bg-indigo-50/30 dark:bg-indigo-950/20 flex flex-col justify-between">
+                        <div className="text-xs font-semibold text-indigo-700 dark:text-indigo-400 uppercase tracking-wider">Total Cost</div>
+                        <div className="text-2xl font-black text-indigo-600 dark:text-indigo-400 mt-2">
+                          ₹{(whatsappInsightsData.totalEstimatedCost || 0).toFixed(2)}
+                        </div>
+                        <div className="text-[11px] text-indigo-600/70 dark:text-indigo-400/70 mt-1">Aggregated usage billing</div>
+                      </div>
+                    </div>
+
+                    {/* Category Breakdown Sections */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-1">
+                      {whatsappInsightsData.categories?.map((cat: any) => {
+                        const isUtility = cat.category === 'UTILITY';
+                        return (
+                          <div
+                            key={cat.category}
+                            className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden flex flex-col justify-between bg-white dark:bg-slate-800 shadow-sm"
+                          >
+                            <div>
+                              {/* Category Card Header */}
+                              <div className="flex items-center justify-between px-4 py-3.5 border-b border-slate-100 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/60 flex-wrap gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className={cn(
+                                    "px-2.5 py-1 rounded-md text-[11px] font-bold tracking-wider uppercase",
+                                    isUtility
+                                      ? "bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300"
+                                      : "bg-amber-100 dark:bg-amber-900/60 text-amber-700 dark:text-amber-300"
+                                  )}>
+                                    {cat.category}
+                                  </span>
+                                  <span className="text-xs text-slate-500 dark:text-slate-400 font-semibold">
+                                    {cat.totalCount} message{cat.totalCount !== 1 ? 's' : ''}
+                                  </span>
+                                </div>
+                                <div className="text-right">
+                                  <span className="text-xs text-slate-400 dark:text-slate-500 mr-1.5 font-medium">Total Cost:</span>
+                                  <span className="text-sm font-extrabold text-slate-800 dark:text-slate-100">
+                                    ₹{(cat.totalCost || 0).toFixed(2)}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Templates list table */}
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-xs">
+                                  <thead>
+                                    <tr className="border-b border-slate-100 dark:border-slate-700/80 bg-slate-50/30 dark:bg-slate-900/30 text-slate-400 dark:text-slate-500">
+                                      <th className="text-left px-4 py-2.5 font-semibold">Template Name</th>
+                                      <th className="text-right px-4 py-2.5 font-semibold">Messages</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                                    {cat.templates?.length === 0 ? (
+                                      <tr>
+                                        <td colSpan={2} className="px-4 py-6 text-center text-slate-400 dark:text-slate-500">
+                                          No {cat.category.toLowerCase()} messages dispatched yet.
+                                        </td>
+                                      </tr>
+                                    ) : (
+                                      cat.templates.map((tpl: any) => (
+                                        <tr key={tpl.templateName} className="hover:bg-slate-50/50 dark:hover:bg-slate-700/20 transition-colors">
+                                          <td className="px-4 py-2.5 font-mono text-[11px] text-slate-700 dark:text-slate-300">
+                                            {tpl.templateName}
+                                          </td>
+                                          <td className="px-4 py-2.5 text-right font-bold text-slate-800 dark:text-slate-200">
+                                            {tpl.count}
+                                          </td>
+                                        </tr>
+                                      ))
+                                    )}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Uncategorized / Free-form section if present */}
+                    {whatsappInsightsData.uncategorized?.totalCount > 0 && (
+                      <div className="border border-slate-200 dark:border-slate-700 rounded-xl p-4 bg-slate-50/40 dark:bg-slate-900/40">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 uppercase">
+                            Free-form / Direct Messages
+                          </span>
+                          <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                            {whatsappInsightsData.uncategorized.totalCount} messages
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400 dark:text-slate-500">
+                          Non-templated custom messages sent directly through portal interactions.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Information Note */}
+                    <div className="p-3.5 rounded-lg bg-blue-50/50 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/40 flex items-start gap-2.5 text-xs text-blue-800 dark:text-blue-300">
+                      <div className="font-semibold mt-0.5">ℹ️</div>
+                      <div>
+                        Total costs represent aggregate messaging utilization calculated per active message categories (Utility &amp; Marketing).
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
           {viewMode === 'principalSignature' && (
             <AdminPrincipalSignature onShowToast={(msg, type) => showToast(msg, type === 'error' ? 'error' : 'success')} />
           )}
@@ -2608,28 +2848,22 @@ const AdminSettings: React.FC<AdminSettingsProps> = ({ showToast, students, init
         onClose={() => setCredentialsModal(null)}
         title="🎉 Employee Registered"
         maxWidth="480px"
-        footer={<Button className="w-full justify-center" onClick={() => setCredentialsModal(null)}><Check size={14} /> Done — Credentials Noted</Button>}
+        footer={<Button className="w-full justify-center" onClick={() => setCredentialsModal(null)}><Check size={14} /> Done</Button>}
       >
         {credentialsModal && (
           <div className="flex flex-col gap-4">
             <p className="text-sm text-slate-600 dark:text-slate-400"><strong>{credentialsModal.name}</strong> can log in using the Employee Portal.</p>
             <div className={cn('flex items-center gap-2 px-3 py-2.5 rounded-md text-sm font-semibold border', credentialsModal.whatsappSent ? 'bg-green-50 border-green-200 text-green-800' : 'bg-amber-50 border-amber-200 text-amber-800')}>
-              {credentialsModal.whatsappSent ? '✅ Credentials sent via WhatsApp.' : '⚠️ WhatsApp blocked (sandbox). Share manually.'}
+              {credentialsModal.whatsappSent ? '✅ Credentials sent to the registered WhatsApp number.' : '⚠️ Account created, but WhatsApp delivery could not be queued.'}
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-blue-lt rounded-md p-3 border border-blue-200">
-                <div className="text-2xs font-bold uppercase text-slate-500 mb-1">Login ID (Employee ID)</div>
-                <div className="text-sm font-bold font-mono text-blue">{credentialsModal.username}</div>
-              </div>
-              <div className="bg-amber-lt rounded-md p-3 border border-amber-200">
-                <div className="text-2xs font-bold uppercase text-slate-500 mb-1">Temporary Password</div>
-                <div className="text-sm font-bold font-mono text-amber">{credentialsModal.password}</div>
-              </div>
+            <div className="bg-blue-lt rounded-md p-3 border border-blue-200">
+              <div className="text-2xs font-bold uppercase text-slate-500 mb-1">Login ID (Employee ID)</div>
+              <div className="text-sm font-bold font-mono text-blue">{credentialsModal.username}</div>
             </div>
             <div className="bg-green-50 border border-green-200 rounded-md p-3 text-xs text-green-800 leading-relaxed">
               <strong>📋 Instructions:</strong><br />
               1. Open login → Employee Portal<br />
-              2. Enter Employee ID + temporary password<br />
+              2. Enter Employee ID + the temporary password sent via WhatsApp<br />
               3. You will be prompted to set a new password on first login
             </div>
           </div>

@@ -48,6 +48,12 @@ export interface SendOptions {
   bypassQuota?: boolean;
   /** HEADER media for a template send (ignored by non-template sends). */
   templateHeader?: TemplateHeaderMedia;
+  /**
+   * Set for AUTHENTICATION templates with a "Copy code" button (e.g. `o_auth`).
+   * Appends a BUTTON component (sub_type "copy_code") carrying this same value,
+   * as Meta's Cloud API requires alongside the BODY parameter.
+   */
+  otpButtonCode?: string;
 }
 
 export interface WhatsAppSendResult {
@@ -638,11 +644,22 @@ export async function sendWhatsAppTemplate(
     const headerComponents = options?.templateHeader
       ? [buildTemplateHeaderComponent(options.templateHeader)]
       : [];
-    const components = [...headerComponents, ...bodyComponents];
+    const buttonComponents = options?.otpButtonCode
+      ? [
+          {
+            type: 'button',
+            sub_type: 'copy_code',
+            index: '0',
+            parameters: [{ type: 'coupon_code', coupon_code: options.otpButtonCode }]
+          }
+        ]
+      : [];
+    const components = [...headerComponents, ...bodyComponents, ...buttonComponents];
     const previewParts = Array.isArray(bodyParameters)
       ? [...bodyParameters]
       : Object.entries(bodyParameters || {}).map(([k, v]) => `${k}=${v}`);
     if (options?.templateHeader) previewParts.unshift(`[${options.templateHeader.type} header]`);
+    if (options?.otpButtonCode) previewParts.push('[copy-code button]');
     return await dispatch({
       to,
       messageType: 'template',

@@ -51,8 +51,7 @@ function buildAlertTemplate(opts: {
 }
 import { requirePermission } from '../../middlewares/permission.middleware';
 import { audit } from '../../middlewares/audit.middleware';
-import { getS3Client, getPresignedDownloadUrl, getMediaType } from '../../services/s3.service';
-import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { getPresignedDownloadUrl, getPresignedUploadUrl, getMediaType } from '../../services/s3.service';
 import { IEventAttachment } from '../../models/event.model';
 import { getPublicOrigin } from '../../utils/publicOrigin';
 
@@ -209,73 +208,53 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/media/upload', requirePermission('events:manage'), async (req: Request, res: Response) => {
+// Presign-only: the browser uploads the file bytes straight to S3 with the
+// returned uploadUrl, never through this server. Replaces the old
+// base64-over-JSON upload, which forced the whole file through Node twice
+// (once as a base64 string in the parsed request body, once again as a
+// decoded Buffer) — synchronous work on the single request-handling thread,
+// blocking every other user's request for the duration, plus was capped at
+// nginx's client_max_body_size (60m, i.e. ~45MB of real file once base64's
+// ~33% inflation is accounted for). This endpoint's own body is tiny
+// (a filename) regardless of how large the actual upload is.
+router.post('/media/presign', requirePermission('events:manage'), async (req: Request, res: Response) => {
   try {
-    const { fileName, mediaBase64 } = req.body;
+    const { fileName } = req.body;
+    if (!fileName || typeof fileName !== 'string') {
+      return res.status(400).json({ success: false, message: 'fileName is required.' });
+    }
 
-    if (mediaBase64) {
-      let isS3Disabled = false;
-      const config = await SystemConfig.findOne({ key: 'disableEventS3Storage' });
-      if (config) {
-        isS3Disabled = config.value === true || config.value === 'true';
-      }
-
-      if (isS3Disabled) {
-        return res.status(400).json({
-          success: false,
-          message: 'Event media storage is currently disabled by the administrator.',
-        });
-      }
-      // Decode base64 data
-      const base64Parts = mediaBase64.split(',');
-      const base64Data = base64Parts.length > 1 ? base64Parts[1] : base64Parts[0];
-      
-      // Determine content type
-      let contentType = 'image/jpeg';
-      const mimeMatch = mediaBase64.match(/^data:([^;]+);/);
-      if (mimeMatch) {
-        contentType = mimeMatch[1];
-      }
-
-      const fileBuffer = Buffer.from(base64Data, 'base64');
-      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-      const name = fileName ? fileName.replace(/\s+/g, '-') : 'media.jpg';
-      const year = new Date().getFullYear();
-      const s3Key = `events/${year}/${uniqueSuffix}-${name}`;
-
-      const uploadParams = {
-        Bucket: process.env.AWS_BUCKET_NAME,
-        Key: s3Key,
-        Body: fileBuffer,
-        ContentType: contentType,
-      };
-
-      await getS3Client().send(new PutObjectCommand(uploadParams));
-      const s3Url = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION || 'ap-southeast-2'}.amazonaws.com/${s3Key}`;
-      console.log(`Saved event media to AWS S3: ${s3Url}`);
-
-      // Preview-only — expires in 7 days (S3's max). The durable reference is
-      // s3Key below, which the client must send back on event creation so it
-      // can be saved to mediaAttachments; that's what the PERMANENT gallery
-      // link (GET /api/events/:eventId/media) mints fresh presigned URLs from
-      // on every visit, so parents can open it any time.
-      const presignedUrl = await getPresignedDownloadUrl(s3Key);
-
-      return res.status(200).json({
-        success: true,
-        message: 'Media uploaded successfully to S3.',
-        url: presignedUrl,
-        s3Key,
-        filename: name,
-        contentType,
-        size: fileBuffer.length,
-        mediaType: getMediaType(s3Key),
+    let isS3Disabled = false;
+    const config = await SystemConfig.findOne({ key: 'disableEventS3Storage' });
+    if (config) {
+      isS3Disabled = config.value === true || config.value === 'true';
+    }
+    if (isS3Disabled) {
+      return res.status(400).json({
+        success: false,
+        message: 'Event media storage is currently disabled by the administrator.',
       });
     }
 
-    return res.status(400).json({ success: false, message: 'No media data provided.' });
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const name = fileName.replace(/\s+/g, '-');
+    const year = new Date().getFullYear();
+    const s3Key = `events/${year}/${uniqueSuffix}-${name}`;
+
+    const [uploadUrl, previewUrl] = await Promise.all([
+      getPresignedUploadUrl(s3Key),
+      getPresignedDownloadUrl(s3Key)
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      uploadUrl,
+      previewUrl,
+      s3Key,
+      mediaType: getMediaType(s3Key)
+    });
   } catch (error: any) {
-    console.error('[Event Media Upload Error]:', error);
+    console.error('[Event Media Presign Error]:', error);
     return res.status(500).json({ success: false, error: error.message });
   }
 });

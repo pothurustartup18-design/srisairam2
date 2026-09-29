@@ -68,6 +68,18 @@ import { monitorAndLogMiddleware, metricsHandler, recordException } from './midd
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Trust exactly one hop: nginx, which sits directly in front of this process
+// (proxy_pass http://127.0.0.1:5000) and sets X-Forwarded-For. Without this,
+// Express falls back to the raw socket address for req.ip, which for every
+// request is nginx's own loopback connection (127.0.0.1) — every visitor
+// looks identical. That silently broke three things: the login rate limiter
+// keyed all attempts, from everyone, into one shared bucket (so ~20 logins
+// anywhere lock out the next login attempt from anyone, and turns the login
+// endpoint into a trivial one-person denial-of-service); and both audit
+// logs and stored session device/IP records show every request as
+// 127.0.0.1, so neither is useful for telling who actually did what.
+app.set('trust proxy', 1);
+
 // Register monitoring middleware early to capture execution duration
 app.use(monitorAndLogMiddleware);
 

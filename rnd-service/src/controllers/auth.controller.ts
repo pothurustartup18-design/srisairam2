@@ -10,8 +10,8 @@ import { PasswordResetOTP } from '../models/passwordResetOTP.model';
 import { ProfileUpdateOTP } from '../models/profileUpdateOTP.model';
 import { getEffectivePermissions } from '../services/permissionEngine';
 import { ALL_PERMISSIONS } from '../config/permissions';
-import { queueNotification } from '../config/queue';
-import { normalizePhone, sendWhatsAppTemplate, sendWhatsAppText } from '../services/whatsapp.service';
+import { queueTemplateNotification } from '../config/queue';
+import { normalizePhone } from '../services/whatsapp.service';
 import { JWT_SECRET, JWT_REFRESH_SECRET } from '../config/secrets';
 
 const hashToken = (token: string): string => {
@@ -463,12 +463,17 @@ export const forgotPassword = async (req: Request, res: Response) => {
       expiresAt
     });
 
-    // Send WhatsApp Text OTP
+    // Send OTP via the approved o_auth AUTHENTICATION template (queued through the
+    // same infrastructure as every other proactive WhatsApp notification).
     let sent = false;
     try {
-      const message = `🔐 SchoolHub Security Alert: Your 6-digit password reset verification code is: *${otp}*. Valid for 15 minutes. Do not share.`;
-      sent = await sendWhatsAppText(phoneResult.e164, message);
-      console.log(`[WhatsApp OTP Dispatch] Sent to ${phoneResult.e164}: ${sent}`);
+      const result = await queueTemplateNotification('auth.otp', {
+        to: phoneResult.e164,
+        params: { code: otp },
+        dedupeKey: `otp:forgot-password:${user._id}:${otp}`
+      });
+      sent = result.queued;
+      if (!sent) console.error(`[WhatsApp OTP Dispatch] Not queued for ${phoneResult.e164}: ${result.reason}`);
     } catch (waErr: any) {
       console.error('[WhatsApp OTP Send Error]:', waErr.message);
     }

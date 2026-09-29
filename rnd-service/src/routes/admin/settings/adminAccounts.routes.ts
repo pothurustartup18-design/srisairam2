@@ -11,6 +11,9 @@ import { PhoneVerification } from '../../../models/phoneVerification.model';
 import { clearCache } from '../../../middlewares/cache.middleware';
 import redisClient from '../../../config/redis';
 import { getEffectivePermissions } from '../../../services/permissionEngine';
+import { sendTemplateNotificationSync } from '../../../config/queue';
+import { retryDbWrite } from '../../../utils/retry';
+import { isDuplicateKeyError, duplicateKeyField } from '../../../utils/mongoErrors';
 
 const router = Router();
 
@@ -82,29 +85,114 @@ router.post('/create-admin', requireRole(['admin']), requirePermission('settings
     // 3. Auto-generate secure temp password and username based on Employee ID
     const generatedPassword = crypto.randomBytes(4).toString('hex'); // 8 characters
     const normalizedUsername = (finalEmpId as string).toLowerCase();
+    const fullName = `${newAdminFirstName.trim()} ${newAdminLastName.trim()}`.trim();
 
-    // 4. Create the new User
-    const newUser = await User.create({
-      username: normalizedUsername,
-      email: newAdminEmail ? newAdminEmail.trim().toLowerCase() : undefined,
-      password: generatedPassword,
-      role: selectedRole,
-      firstName: newAdminFirstName.trim(),
-      lastName: newAdminLastName.trim(),
-      phone: newAdminPhone.trim(),
-      isActive: true,
-      mustChangePassword: true,
-      employeeId: finalEmpId,
-      permissions: permissions || undefined,
-      createdBy: currentAdminId
-    });
+    // 4. Reservation phase. The findOne checks above are a fast, friendly
+    //    pre-check but are NOT atomic — two concurrent requests can both pass
+    //    them before either writes anything. The real guard is the unique
+    //    index on User.username / User.email / User.employeeId, so the actual
+    //    creation happens HERE, now, atomically — but with `isActive: false`
+    //    (the same flag the login gate in config/passport.ts already checks),
+    //    so nothing usable exists yet. This closes the race deterministically:
+    //    a losing concurrent request fails right here on a duplicate-key
+    //    error, BEFORE any WhatsApp message is ever sent for it.
+    let newUser;
+    try {
+      newUser = await User.create({
+        username: normalizedUsername,
+        email: newAdminEmail ? newAdminEmail.trim().toLowerCase() : undefined,
+        password: generatedPassword,
+        role: selectedRole,
+        firstName: newAdminFirstName.trim(),
+        lastName: newAdminLastName.trim(),
+        phone: newAdminPhone.trim(),
+        isActive: false, // reservation only — flipped true after WhatsApp succeeds
+        mustChangePassword: true,
+        employeeId: finalEmpId,
+        permissions: permissions || undefined,
+        createdBy: currentAdminId
+      });
+    } catch (err: any) {
+      if (isDuplicateKeyError(err)) {
+        const field = duplicateKeyField(err);
+        return res.status(400).json({
+          success: false,
+          message:
+            field === 'email'
+              ? 'Email address is already in use.'
+              : field === 'employeeId'
+                ? `Employee ID ${finalEmpId} is already in use.`
+                : `Username ${normalizedUsername} is already in use.`
+        });
+      }
+      throw err;
+    }
+
+    // 5. Send phase — synchronous, bypasses BullMQ/Redis, waits for the real
+    //    Graph API result (including whatsapp.service's own in-process retry
+    //    for transient errors). requireLiveSend guards against a misconfigured
+    //    production deploy silently running in WhatsApp "simulation mode".
+    const sendResult = await sendTemplateNotificationSync(
+      'staff.credentials_new',
+      {
+        to: newAdminPhone,
+        params: {
+          name_en: fullName,
+          employee_id_en: finalEmpId as string,
+          temporary_password_en: generatedPassword,
+          name_te: fullName,
+          employee_id_te: finalEmpId as string,
+          temporary_password_te: generatedPassword
+        },
+        dedupeKey: `staff-credentials-new:${finalEmpId}`
+      },
+      { requireLiveSend: true }
+    );
+
+    if (!sendResult.success) {
+      console.error(`[WhatsApp] staff_credentials_new not accepted by Meta for ${newAdminPhone}: ${sendResult.reason}`);
+      // Compensate: the reservation was never activated/usable, so removing it
+      // leaves the system exactly as if this request had never happened.
+      await User.deleteOne({ _id: newUser._id }).catch(() => {});
+      return res.status(502).json({
+        success: false,
+        userCreated: false,
+        whatsappSent: false,
+        message: 'WhatsApp message could not be sent. User was not created.'
+      });
+    }
+
+    // 6. Activation phase. WhatsApp has already, irreversibly, delivered the
+    //    credentials. This write now MUST succeed for the account to become
+    //    usable. A transient Mongo blip is retried a few times (safe — setting
+    //    isActive true is idempotent). If it still fails, we do not pretend to
+    //    roll anything back (the message is already out) — we surface the
+    //    ambiguous state honestly instead of silently leaving a stuck account.
+    try {
+      await retryDbWrite(async () => {
+        newUser.isActive = true;
+        await newUser.save();
+      });
+    } catch (err: any) {
+      console.error(
+        `[CRITICAL][WhatsApp/DB mismatch] staff_credentials_new was accepted by Meta for ${fullName} (${newAdminPhone}, ` +
+          `employeeId ${finalEmpId}, userId ${newUser._id}) but activating the account failed after retries: ${err.message}. ` +
+          `The credential message was already delivered — do NOT retry this request. This account needs manual investigation.`
+      );
+      return res.status(502).json({
+        success: false,
+        userCreated: 'unknown',
+        whatsappSent: true,
+        message: 'Credentials were sent via WhatsApp, but the account could not be finalized. Do not retry — contact a system administrator.'
+      });
+    }
 
     // Invalidate Redis profile cache
     if (redisClient && redisClient.status === 'ready') {
       await redisClient.del(`user:profile:${newUser._id}`).catch(() => {});
     }
 
-    // 5. If role is 'teacher', seed matching Teacher profile for dashboard compatibility
+    // 7. If role is 'teacher', seed matching Teacher profile for dashboard compatibility
     if (selectedRole === 'teacher') {
       try {
         const nextEmpId = finalEmpId || `EMP-${Math.floor(100 + Math.random() * 900)}`;
@@ -126,27 +214,16 @@ router.post('/create-admin', requireRole(['admin']), requirePermission('settings
 
     // Credentials are delivered via WhatsApp only — do not log plaintext passwords to console in production
 
-    // 6. Onboarding credentials over WhatsApp are BLOCKED — staff_credentials_new
-    //    is REJECTED by Meta and school_notification is PENDING, so there is no
-    //    approved template. Proactive free-form is disabled. The plaintext
-    //    credentials are returned in this response for the admin to relay.
-    const whatsappSent = false;
-    console.warn(
-      `[BLOCKED] Employee onboarding credentials NOT sent over WhatsApp (${newAdminPhone}) — ` +
-        `no approved Meta template (staff_credentials_new REJECTED, school_notification PENDING). ` +
-        `Deliver credentials from the ERP response.`
-    );
-
-    // Clean up the verified OTP document only after the transaction is fully complete and verified
+    // Clean up the verified OTP document only after the account is fully created
     await PhoneVerification.deleteOne({ phone: cleanPhone });
 
     return res.status(201).json({
       success: true,
-      message: `Employee account for ${newUser.firstName} ${newUser.lastName} (${newUser.employeeId || newUser.username}) created successfully.`,
+      userCreated: true,
+      whatsappSent: true,
+      message: `Employee account for ${newUser.firstName} ${newUser.lastName} (${newUser.employeeId || newUser.username}) created successfully. Credentials were sent to the registered WhatsApp number.`,
       credentials: {
-        username: newUser.employeeId || newUser.username,
-        password: generatedPassword,
-        whatsappSent
+        username: newUser.employeeId || newUser.username
       }
     });
 
