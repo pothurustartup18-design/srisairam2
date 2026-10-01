@@ -133,10 +133,10 @@ router.post('/create-admin', requireRole(['admin']), requirePermission('settings
         params: {
           name_en: fullName,
           employee_id_en: finalEmpId as string,
-          temporary_password_en: generatedPassword,
+          temporary_pwd_en: generatedPassword,
           name_te: fullName,
           employee_id_te: finalEmpId as string,
-          temporary_password_te: generatedPassword
+          temporary_pwd_te: generatedPassword
         },
         dedupeKey: `staff-credentials-new:${finalEmpId}`
       },

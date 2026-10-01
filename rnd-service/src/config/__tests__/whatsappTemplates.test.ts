@@ -363,8 +363,8 @@ describe('auth.otp — o_auth (AUTHENTICATION, POSITIONAL, copy-code button)', (
 
 describe('staff.credentials_new — staff_credentials_new (NAMED, no header, no button)', () => {
   const PARAMS = {
-    name_en: 'Harsha Vardhan', employee_id_en: 'EMP-042', temporary_password_en: 'a1b2c3d4',
-    name_te: 'Harsha Vardhan', employee_id_te: 'EMP-042', temporary_password_te: 'a1b2c3d4'
+    name_en: 'Harsha Vardhan', employee_id_en: 'EMP-042', temporary_pwd_en: 'a1b2c3d4',
+    name_te: 'Harsha Vardhan', employee_id_te: 'EMP-042', temporary_pwd_te: 'a1b2c3d4'
   };
 
   it('maps to staff_credentials_new / en / 6 named params', () => {
@@ -375,7 +375,7 @@ describe('staff.credentials_new — staff_credentials_new (NAMED, no header, no 
     expect(def.otpButton ?? false).toBe(false);
     expect(def.header).toBeUndefined();
     expect(def.parameters).toEqual([
-      'name_en', 'employee_id_en', 'temporary_password_en', 'name_te', 'employee_id_te', 'temporary_password_te'
+      'name_en', 'employee_id_en', 'temporary_pwd_en', 'name_te', 'employee_id_te', 'temporary_pwd_te'
     ]);
   });
 
@@ -389,11 +389,11 @@ describe('staff.credentials_new — staff_credentials_new (NAMED, no header, no 
   });
 
   it('rejects when a param is missing', () => {
-    const { temporary_password_te, ...rest } = PARAMS;
+    const { temporary_pwd_te, ...rest } = PARAMS;
     const res = resolveTemplateMessage('staff.credentials_new', rest);
     expect(res.ok).toBe(false);
     if (res.ok) return;
-    expect(res.error).toMatch(/temporary_password_te/);
+    expect(res.error).toMatch(/temporary_pwd_te/);
   });
 });
 

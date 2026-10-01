@@ -292,8 +292,8 @@ describe('queueTemplateNotification — staff credential templates (NAMED, no he
     const res = await queueTemplateNotification('staff.credentials_new', {
       to: '8899582239',
       params: {
-        name_en: 'Harsha Vardhan', employee_id_en: 'EMP-042', temporary_password_en: 'a1b2c3d4',
-        name_te: 'Harsha Vardhan', employee_id_te: 'EMP-042', temporary_password_te: 'a1b2c3d4'
+        name_en: 'Harsha Vardhan', employee_id_en: 'EMP-042', temporary_pwd_en: 'a1b2c3d4',
+        name_te: 'Harsha Vardhan', employee_id_te: 'EMP-042', temporary_pwd_te: 'a1b2c3d4'
       }
     });
     expect(res).toEqual({ queued: true });
@@ -301,7 +301,7 @@ describe('queueTemplateNotification — staff credential templates (NAMED, no he
     expect(jobData.templateName).toBe('staff_credentials_new');
     expect(jobData.otpButtonCode).toBeUndefined();
     expect(Object.keys(jobData.bodyParameters)).toEqual([
-      'name_en', 'employee_id_en', 'temporary_password_en', 'name_te', 'employee_id_te', 'temporary_password_te'
+      'name_en', 'employee_id_en', 'temporary_pwd_en', 'name_te', 'employee_id_te', 'temporary_pwd_te'
     ]);
   });
 
@@ -319,10 +319,10 @@ describe('queueTemplateNotification — staff credential templates (NAMED, no he
   it('rejects staff.credentials_new with a missing param', async () => {
     const res = await queueTemplateNotification('staff.credentials_new', {
       to: '8899582239',
-      params: { name_en: 'x', employee_id_en: 'y', temporary_password_en: 'z', name_te: 'x', employee_id_te: 'y' }
+      params: { name_en: 'x', employee_id_en: 'y', temporary_pwd_en: 'z', name_te: 'x', employee_id_te: 'y' }
     });
     expect(res.queued).toBe(false);
-    expect(res.reason).toMatch(/temporary_password_te/);
+    expect(res.reason).toMatch(/temporary_pwd_te/);
     expect(addMock).not.toHaveBeenCalled();
   });
 });

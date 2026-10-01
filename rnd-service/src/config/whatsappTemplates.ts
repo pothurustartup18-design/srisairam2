@@ -64,15 +64,19 @@
  *       different feature, the Limited-Time-Offer MARKETING coupon button,
  *       and produced live Meta error 132018 when tried here on 2026-09-29)
  *       — see `parameterFormat`/`otpButton` below.
- *   staff_credentials_new        en  APPROVED  (category not yet confirmed —
- *       treated as UTILITY here for billing only; verify in WhatsApp Manager)
- *       Verified via WhatsApp Manager UI on 2026-09-29. NAMED, no header.
- *       body params: name_en, employee_id_en, temporary_password_en,
- *                    name_te, employee_id_te, temporary_password_te
- *   staff_credentials_reset      en  APPROVED  (category not yet confirmed —
- *       treated as UTILITY here for billing only; verify in WhatsApp Manager)
- *       Verified via WhatsApp Manager UI on 2026-09-29. NAMED, no header.
- *       body params: username_en, password_en, username_te, password_te
+ *   staff_credentials_new        en  APPROVED  UTILITY    NAMED  BODY only
+ *       Verified live against Meta on 2026-10-01 (GET .../message_templates).
+ *       body params: name_en, employee_id_en, temporary_pwd_en,
+ *                    name_te, employee_id_te, temporary_pwd_te
+ *       NOTE: the param was originally `temporary_password_en`/`_te` (22
+ *       chars) — APPROVED by Meta at that length, but every send still failed
+ *       with error 132018 ("Param ... parameter_name must be at most 20
+ *       characters long"). Meta enforces a stricter 20-char cap on
+ *       parameter_name at SEND time than at template-approval time. Renamed
+ *       to `temporary_pwd_en`/`_te` (16 chars) and re-approved to fix.
+ *   staff_credentials_reset      en  APPROVED  UTILITY    NAMED  BODY only
+ *       Verified live against Meta on 2026-10-01. body params:
+ *       username_en, password_en, username_te, password_te
  *
  * Every approved body text already contains BOTH the English and Telugu
  * sentences (where bilingual), so ONE template send covers both languages
@@ -252,10 +256,10 @@ export const WHATSAPP_TEMPLATES = {
     parameters: [
       'name_en',
       'employee_id_en',
-      'temporary_password_en',
+      'temporary_pwd_en',
       'name_te',
       'employee_id_te',
-      'temporary_password_te'
+      'temporary_pwd_te'
     ]
   },
   'staff.credentials_reset': {

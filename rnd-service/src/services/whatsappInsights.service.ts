@@ -19,7 +19,12 @@ export const META_CATEGORY_BY_TEMPLATE: Record<string, 'UTILITY' | 'MARKETING'> 
   transport_bus_alert: 'UTILITY',
   announcement_broadcast: 'MARKETING',
   event_announcement: 'MARKETING',
-  event_announcement_media: 'MARKETING'
+  event_announcement_media: 'MARKETING',
+  staff_credentials_new: 'UTILITY',
+  staff_credentials_reset: 'UTILITY'
+  // o_auth is AUTHENTICATION-category, which this map (and the pricing tiers
+  // in DEFAULT_BASE_PRICE below) don't model yet — it falls into "OTHER" in
+  // cost reporting until an AUTHENTICATION pricing tier is added.
 };
 
 const DEFAULT_BASE_PRICE = {

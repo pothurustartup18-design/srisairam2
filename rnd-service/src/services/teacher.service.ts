@@ -188,10 +188,10 @@ export async function createTeacher(body: any) {
       params: {
         name_en: name,
         employee_id_en: finalEmpId,
-        temporary_password_en: tempPassword,
+        temporary_pwd_en: tempPassword,
         name_te: name,
         employee_id_te: finalEmpId,
-        temporary_password_te: tempPassword
+        temporary_pwd_te: tempPassword
       },
       dedupeKey: `staff-credentials-new:${finalEmpId}`
     },

@@ -25,8 +25,8 @@ const errorResponse = (httpStatus: number, code: number, message = 'meta error',
   new Response(JSON.stringify({ error: { message, type: 'OAuthException', code } }), { status: httpStatus, headers });
 
 const STAFF_NEW_PARAMS = {
-  name_en: 'Asha Rao', employee_id_en: 'EMP-100', temporary_password_en: 'a1b2c3d4',
-  name_te: 'Asha Rao', employee_id_te: 'EMP-100', temporary_password_te: 'a1b2c3d4'
+  name_en: 'Asha Rao', employee_id_en: 'EMP-100', temporary_pwd_en: 'a1b2c3d4',
+  name_te: 'Asha Rao', employee_id_te: 'EMP-100', temporary_pwd_te: 'a1b2c3d4'
 };
 
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -105,13 +105,13 @@ describe('sendTemplateNotificationSync — staff.credentials_new', () => {
   }, 15000);
 
   it('never calls Meta when the template payload itself is invalid (missing param)', async () => {
-    const { temporary_password_te, ...incomplete } = STAFF_NEW_PARAMS;
+    const { temporary_pwd_te, ...incomplete } = STAFF_NEW_PARAMS;
     const res = await sendTemplateNotificationSync('staff.credentials_new', {
       to: '8899582239',
       params: incomplete
     });
     expect(res.success).toBe(false);
-    expect(res.reason).toMatch(/temporary_password_te/);
+    expect(res.reason).toMatch(/temporary_pwd_te/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
