@@ -1,0 +1,211 @@
+.cropper-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(8px);
+}
+
+.cropper-modal {
+  width: 500px;
+  max-width: 90%;
+  background-color: #121212;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header */
+.cropper-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  border-bottom: 1px solid #27272a;
+  color: #f4f4f5;
+  background-color: #18181b;
+}
+
+.header-icon-btn {
+  background: none;
+  border: none;
+  color: #a1a1aa;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s, color 0.2s;
+}
+
+.header-icon-btn:hover {
+  background-color: #27272a;
+  color: #ffffff;
+}
+
+.header-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.header-upload-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background-color: transparent;
+  border: 1px solid #3f3f46;
+  color: #ffffff;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.header-upload-btn:hover {
+  background-color: #27272a;
+  border-color: #52525b;
+}
+
+/* Body Viewport */
+.cropper-body {
+  position: relative;
+  height: 380px;
+  overflow: hidden;
+  background-color: #09090b;
+  cursor: grab;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+}
+
+.cropper-body:active {
+  cursor: grabbing;
+}
+
+.cropper-image-container {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none; /* Let drag events hit the parent container */
+}
+
+.cropper-source-img {
+  max-width: 320px;
+  max-height: 320px;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+/* Circular Mask Overlay */
+.cropper-circular-mask {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none; /* Let drag pass through */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle 140px, transparent 100%, rgba(9, 9, 11, 0.75) 100%);
+}
+
+.cropper-viewfinder {
+  width: 280px;
+  height: 280px;
+  border-radius: 50%;
+  border: 2px dashed rgba(255, 255, 255, 0.45);
+  box-shadow: 0 0 0 9999px rgba(9, 9, 11, 0.65);
+}
+
+/* Sidebar Zoom Control */
+.cropper-zoom-sidebar {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  background-color: rgba(24, 24, 27, 0.85);
+  padding: 8px;
+  border-radius: 9999px;
+  border: 1px solid rgba(63, 63, 70, 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 10;
+}
+
+.zoom-btn {
+  background: none;
+  border: none;
+  color: #a1a1aa;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+
+.zoom-btn:hover {
+  background-color: #27272a;
+  color: #ffffff;
+}
+
+.zoom-indicator {
+  font-size: 10px;
+  font-weight: 700;
+  color: #d4d4d8;
+  width: 32px;
+  text-align: center;
+}
+
+/* Footer */
+.cropper-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 16px 24px;
+  background-color: #18181b;
+  border-top: 1px solid #27272a;
+}
+
+.confirm-check-btn {
+  background-color: #10b981;
+  color: white;
+  border: none;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 10px rgba(16, 185, 129, 0.4);
+  transition: transform 0.15s, background-color 0.15s;
+}
+
+.confirm-check-btn:hover {
+  background-color: #059669;
+  transform: scale(1.05);
+}
+
+.confirm-check-btn:active {
+  transform: scale(0.95);
+}

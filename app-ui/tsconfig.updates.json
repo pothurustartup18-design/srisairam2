@@ -1,0 +1,16 @@
+{
+  // Strict type-check gate for the app-update code only. The wider codebase has
+  // pre-existing type errors, so CI checks this scope (see docs/APP_UPDATES.md).
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": { "strict": true, "noEmit": true, "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.updates.tsbuildinfo" },
+  "include": [
+    "src/services/appUpdates/**/*.ts",
+    "src/hooks/useAppUpdates.ts",
+    "src/services/sessionTokens.ts",
+    "src/services/savedLogins.ts",
+    "src/components/shared/LoginPage/SavedLoginsSheet.tsx",
+    "src/services/api.ts",
+    "src/components/shared/AppUpdates/**/*.tsx"
+  ],
+  "exclude": ["src/**/__tests__/**"]
+}

@@ -1,0 +1,91 @@
+apply plugin: 'com.android.application'
+
+// Native version lives in version.properties (see docs/APP_UPDATES.md).
+def versionProps = new Properties()
+file('version.properties').withInputStream { versionProps.load(it) }
+
+// Release signing: CI passes ANDROID_KEYSTORE_* env vars; locally, point
+// ANDROID_KEYSTORE_PROPERTIES at a keystore.properties file kept OUTSIDE the
+// repo. Without either, release builds are left unsigned (and CI fails).
+def keystoreProps = new Properties()
+def keystorePropsPath = System.getenv('ANDROID_KEYSTORE_PROPERTIES')
+if (keystorePropsPath && file(keystorePropsPath).exists()) {
+    file(keystorePropsPath).withInputStream { keystoreProps.load(it) }
+    def storeFileProp = keystoreProps.getProperty('storeFile')
+    if (storeFileProp && !new File(storeFileProp).isAbsolute()) {
+        keystoreProps.setProperty('storeFile', new File(file(keystorePropsPath).parentFile, storeFileProp).absolutePath)
+    }
+}
+def signingValue = { String envName, String propName ->
+    System.getenv(envName) ?: keystoreProps.getProperty(propName)
+}
+def releaseStoreFile = signingValue('ANDROID_KEYSTORE_FILE', 'storeFile')
+
+android {
+    namespace = "com.schoolhub.app"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "com.schoolhub.app"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode versionProps.getProperty('VERSION_CODE') as Integer
+        versionName versionProps.getProperty('VERSION_NAME')
+        // Local Wi-Fi testing only (scripts/release/local-release.mjs passes
+        // -PallowHttpUpdates=true). CI/production builds keep HTTPS-only updates.
+        manifestPlaceholders = [allowHttpUpdates: (project.findProperty('allowHttpUpdates') ?: 'false')]
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    signingConfigs {
+        if (releaseStoreFile) {
+            release {
+                storeFile file(releaseStoreFile)
+                storePassword signingValue('ANDROID_KEYSTORE_PASSWORD', 'storePassword')
+                keyAlias signingValue('ANDROID_KEY_ALIAS', 'keyAlias')
+                keyPassword signingValue('ANDROID_KEY_PASSWORD', 'keyPassword')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            if (releaseStoreFile) {
+                signingConfig signingConfigs.release
+            }
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

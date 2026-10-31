@@ -1,0 +1,187 @@
+/* ─── LoginPage.css ──────────────────────────────────────────────────────────
+   Signed-out screens (login, super-admin login, forgot / forced password
+   change): brand panel + form card. Values come from src/styles/tokens.css.
+──────────────────────────────────────────────────────────────────────────── */
+
+.login-page-container {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  width: 100%;
+  box-sizing: border-box;
+  background: rgb(var(--canvas));
+  position: relative;
+}
+
+/* ── Brand panel (≥1024px) ────────────────────────────────────────────────── */
+.auth-brand {
+  display: none;
+  flex-direction: column;
+  justify-content: space-between;
+  width: min(44%, 560px);
+  flex-shrink: 0;
+  padding: 40px 48px;
+  box-sizing: border-box;
+  color: #fff;
+  background:
+    radial-gradient(120% 80% at 0% 0%, rgb(var(--brand-500) / 0.55) 0%, transparent 60%),
+    linear-gradient(160deg, rgb(var(--brand-700)) 0%, rgb(var(--brand-900)) 100%);
+  position: relative;
+  overflow: hidden;
+}
+.auth-brand::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgb(255 255 255 / 0.08) 1px, transparent 1px);
+  background-size: 22px 22px;
+  mask-image: linear-gradient(180deg, transparent, #000 40%, transparent);
+  pointer-events: none;
+}
+.auth-brand > * { position: relative; z-index: 1; }
+.auth-brand-top { display: flex; align-items: center; gap: 12px; }
+.auth-brand-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; border-radius: 12px; overflow: hidden;
+  background: rgb(255 255 255 / 0.14); border: 1px solid rgb(255 255 255 / 0.2);
+}
+.auth-brand-mark img { width: 100%; height: 100%; object-fit: cover; background: #fff; }
+.auth-brand-name { font-size: 17px; font-weight: 750; letter-spacing: -0.01em; }
+.auth-brand-body h2 {
+  margin: 0 0 12px;
+  font-size: clamp(26px, 2.4vw, 34px);
+  line-height: 1.15;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #fff;
+  max-width: 420px;
+}
+.auth-brand-body > p { margin: 0 0 28px; font-size: 15px; color: rgb(255 255 255 / 0.78); max-width: 380px; }
+.auth-brand-body ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 16px; }
+.auth-brand-body li { display: flex; gap: 14px; align-items: flex-start; }
+.auth-brand-body li strong { display: block; font-size: 14px; font-weight: 700; }
+.auth-brand-body li span span { display: block; font-size: 13px; color: rgb(255 255 255 / 0.72); margin-top: 1px; }
+.auth-brand-icon {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 38px; height: 38px; border-radius: 11px;
+  background: rgb(255 255 255 / 0.12); border: 1px solid rgb(255 255 255 / 0.16);
+}
+.auth-brand-foot { margin: 0; font-size: 12px; color: rgb(255 255 255 / 0.55); }
+
+/* ── Form column ──────────────────────────────────────────────────────────── */
+.auth-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(clamp(20px, 6vw, 48px) + var(--sat)) 16px calc(clamp(20px, 6vw, 48px) + var(--sab));
+  box-sizing: border-box;
+}
+
+.login-card {
+  background-color: rgb(var(--surface));
+  border-radius: var(--radius-2xl);
+  padding: clamp(24px, 6vw, 36px) clamp(20px, 5vw, 32px);
+  width: 100%;
+  box-shadow: var(--shadow-raised);
+  border: 1px solid rgb(var(--line));
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 20px;
+  animation: card-fade-in 0.35s var(--ease-out);
+  box-sizing: border-box;
+  position: relative;
+}
+
+@keyframes card-fade-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Card header ──────────────────────────────────────────────────────────── */
+.login-logo { display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+.login-logo-icon {
+  width: 52px;
+  height: 52px;
+  padding: 12px;
+  box-sizing: border-box;
+  border-radius: 16px;
+  color: #fff;
+  background: rgb(var(--brand-600));
+  box-shadow: 0 8px 20px -6px rgb(var(--brand-600) / 0.55);
+}
+img.login-logo-icon { padding: 0; background: #fff; object-fit: contain; box-shadow: var(--shadow-card); border: 1px solid rgb(var(--line)); }
+.login-title {
+  font-size: clamp(21px, 5vw, 25px);
+  font-weight: 800;
+  color: rgb(var(--ink));
+  margin: 0;
+  letter-spacing: -0.02em;
+  text-align: center;
+}
+.login-divider { width: 100%; height: 1px; background: rgb(var(--line)); }
+.login-welcome-banner { text-align: center; width: 100%; }
+.login-welcome-en { font-size: var(--text-sm); font-weight: 500; color: rgb(var(--muted)); }
+
+/* ── Segmented role selector ──────────────────────────────────────────────── */
+.login-role-selector {
+  display: flex;
+  background-color: rgb(var(--surface-3));
+  padding: 4px;
+  border-radius: var(--radius-lg);
+  gap: 4px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.login-role-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: rgb(var(--muted));
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease-out), color var(--dur) ease, box-shadow var(--dur) ease;
+  font-family: inherit;
+  user-select: none;
+}
+.login-role-tab:hover { color: rgb(var(--ink)); }
+.login-role-tab.active {
+  background-color: rgb(var(--surface));
+  color: rgb(var(--brand-700));
+  font-weight: 700;
+  box-shadow: var(--shadow-card);
+}
+
+/* Old role buttons, kept for screens that still render them */
+.login-iit-btn {
+  width: 100%;
+  min-height: var(--control-h);
+  padding: 0 20px;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgb(var(--line-strong));
+  background-color: rgb(var(--surface));
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.login-iit-btn:hover { border-color: rgb(var(--brand-500)); background-color: rgb(var(--brand-50)); }
+.login-iit-btn-en { font-size: 15px; font-weight: 600; color: rgb(var(--ink)); }
+
+@media (min-width: 1024px) {
+  .auth-brand { display: flex; }
+}
+@media (max-width: 479px) {
+  .auth-main { align-items: flex-start; padding-top: calc(28px + var(--sat)); }
+  .login-card { box-shadow: var(--shadow-card); }
+}

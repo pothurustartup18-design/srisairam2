@@ -1,0 +1,44 @@
+.shared-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 8px;
+  padding: 48px 20px;
+  color: #64748b;
+}
+
+.dark .shared-empty-state {
+  color: #94a3b8;
+}
+
+.shared-empty-icon {
+  color: #cbd5e1;
+  margin-bottom: 4px;
+}
+
+.dark .shared-empty-icon {
+  color: #475569;
+}
+
+.shared-empty-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #334155;
+  margin: 0;
+}
+
+.dark .shared-empty-title {
+  color: #e2e8f0;
+}
+
+.shared-empty-description {
+  font-size: 13.5px;
+  margin: 0;
+  max-width: 360px;
+}
+
+.shared-empty-action {
+  margin-top: 8px;
+}

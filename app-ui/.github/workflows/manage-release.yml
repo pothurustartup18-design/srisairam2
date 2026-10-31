@@ -1,0 +1,58 @@
+name: Release - Manage rollout
+
+# Pause, resume/promote, change rollout or revoke an existing release.
+# Rolling back a bad web bundle = "publish" an older known-good web release ID
+# (it becomes the channel's target again). Native APKs can never be
+# downgraded; pause/revoke a bad one and ship a fixed higher versionCode.
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Channel (selects the GitHub Environment / approvals)
+        type: choice
+        options: [staging, production]
+        default: staging
+      action:
+        description: Action
+        type: choice
+        options: [publish, pause, revoke, list]
+        default: list
+      release_id:
+        description: Release ID (not needed for list)
+        type: string
+        default: ''
+      rollout_percent:
+        description: Rollout percentage for publish (1-100)
+        type: number
+        default: 100
+
+permissions:
+  contents: read
+
+jobs:
+  manage:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.channel }}
+    env:
+      API: ${{ vars.RELEASE_API_BASE }}
+      TOKEN: ${{ secrets.APP_RELEASE_CI_TOKEN }}
+      # Inputs go through env, never straight into scripts (prevents injection).
+      RELEASE_ID: ${{ inputs.release_id }}
+      ACTION: ${{ inputs.action }}
+      CHANNEL: ${{ inputs.channel }}
+      ROLLOUT: ${{ inputs.rollout_percent }}
+    steps:
+      - name: Run action
+        run: |
+          if [ "$ACTION" = "list" ]; then
+            curl -sS --fail-with-body -H "X-Release-Token: $TOKEN" "$API/app-updates/admin/releases?channel=$CHANNEL" \
+              | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{for(const r of JSON.parse(s).data){console.log([r.releaseId,r.kind,r.status,r.rolloutPercent+"%",r.versionCode??"",JSON.stringify(r.events)].join("\t"))}})'
+            exit 0
+          fi
+          [[ "$RELEASE_ID" =~ ^[a-z0-9][a-z0-9._-]{2,63}$ ]] || { echo "Invalid release_id"; exit 1; }
+          BODY='{}'
+          [[ "$ROLLOUT" =~ ^[0-9]+$ ]] || { echo "Invalid rollout_percent"; exit 1; }
+          [ "$ACTION" = "publish" ] && BODY="{\"rolloutPercent\": $ROLLOUT}"
+          curl -sS --fail-with-body -X POST "$API/app-updates/admin/releases/$RELEASE_ID/$ACTION" \
+            -H "Content-Type: application/json" -H "X-Release-Token: $TOKEN" -d "$BODY"
+          echo

@@ -1,0 +1,134 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Design tokens — the single source of truth for colour, type, spacing,
+   radius, elevation and layout dimensions. Tailwind's theme (tailwind.config.ts)
+   reads these variables, so utilities like `bg-blue`, `text-ink`, `shadow-card`
+   and `rounded-lg` all resolve here. Colour channels are stored as "R G B" so
+   Tailwind opacity modifiers (`bg-blue/10`) keep working.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Brand (royal blue) ─────────────────────────────────────────────── */
+  --brand-50: 239 244 255;
+  --brand-100: 220 230 254;
+  --brand-200: 191 208 253;
+  --brand-300: 147 175 251;
+  --brand-400: 102 136 247;
+  --brand-500: 69 104 240;
+  --brand-600: 47 85 228;
+  --brand-700: 36 67 196;
+  --brand-800: 34 56 158;
+  --brand-900: 33 52 125;
+
+  /* ── Role accent — overridden per portal via [data-role] ───────────── */
+  --accent: 47 85 228;
+  --accent-soft: 239 244 255;
+  --accent-ink: 36 67 196;
+
+  /* ── Surfaces & text ────────────────────────────────────────────────── */
+  --canvas: 244 246 251;      /* app background */
+  --surface: 255 255 255;     /* cards, bars, sheets */
+  --surface-2: 248 250 253;   /* subtle fills: table heads, inputs at rest */
+  --surface-3: 238 242 248;   /* pressed / selected neutral */
+  --line: 229 233 242;        /* default border */
+  --line-strong: 208 215 228; /* input border, dividers that must read */
+  --ink: 15 23 42;            /* primary text */
+  --ink-2: 51 65 85;          /* secondary text */
+  --muted: 100 116 139;       /* tertiary / helper text */
+  --faint: 148 163 184;       /* placeholders, disabled */
+
+  /* ── Status ─────────────────────────────────────────────────────────── */
+  --success: 5 150 105;   --success-soft: 236 253 245;
+  --warning: 217 119 6;   --warning-soft: 255 251 235;
+  --danger: 225 29 72;    --danger-soft: 255 241 242;
+  --info: 2 132 199;      --info-soft: 240 249 255;
+
+  /* ── Typography ─────────────────────────────────────────────────────── */
+  --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, monospace;
+  --text-2xs: 10.5px;
+  --text-xs: 11.5px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --text-lg: 17px;
+  --text-xl: 19px;
+  --text-2xl: 22px;
+  --text-3xl: clamp(22px, 2.2vw + 14px, 28px);
+  --text-4xl: clamp(26px, 2.6vw + 16px, 34px);
+
+  /* ── Spacing scale (4px base) ───────────────────────────────────────── */
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px;
+
+  /* ── Radius ─────────────────────────────────────────────────────────── */
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-2xl: 24px;
+
+  /* ── Elevation ──────────────────────────────────────────────────────── */
+  --shadow-xs: 0 1px 2px rgb(15 23 42 / 0.05);
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.05);
+  --shadow-raised: 0 4px 12px -2px rgb(15 23 42 / 0.08), 0 2px 4px -2px rgb(15 23 42 / 0.05);
+  --shadow-overlay: 0 24px 48px -12px rgb(15 23 42 / 0.22), 0 8px 16px -8px rgb(15 23 42 / 0.10);
+  --focus-ring: 0 0 0 3px rgb(var(--brand-500) / 0.28);
+
+  /* ── Control & layout dimensions ────────────────────────────────────── */
+  --control-h: 44px;       /* inputs, primary buttons (touch target) */
+  --control-h-sm: 36px;    /* dense desktop controls */
+  --icon-sm: 16px; --icon-md: 20px; --icon-lg: 24px;
+  --sidebar-w: 264px;
+  --sidebar-rail-w: 76px;
+  --topbar-h: 64px;
+  --appbar-h: 56px;
+  --bottomnav-h: 64px;
+
+  /* ── Safe areas (0 in a normal browser) ─────────────────────────────── */
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+
+  /* ── Motion ─────────────────────────────────────────────────────────── */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 120ms;
+  --dur: 200ms;
+}
+
+/* Role accents: a quiet signal of which portal you are in */
+[data-role='admin'], [data-role='other'] { --accent: 79 70 229;  --accent-soft: 238 242 255; --accent-ink: 67 56 202; }
+[data-role='teacher']                    { --accent: 13 148 136; --accent-soft: 240 253 250; --accent-ink: 15 118 110; }
+[data-role='parent']                     { --accent: 47 85 228;  --accent-soft: 239 244 255; --accent-ink: 36 67 196; }
+[data-role='superadmin']                 { --accent: 124 58 237; --accent-soft: 245 243 255; --accent-ink: 109 40 217; }
+
+.dark {
+  --canvas: 11 15 25;
+  --surface: 19 25 38;
+  --surface-2: 24 31 46;
+  --surface-3: 32 41 59;
+  --line: 38 48 68;
+  --line-strong: 55 67 92;
+  --ink: 241 245 249;
+  --ink-2: 203 213 225;
+  --muted: 148 163 184;
+  --faint: 100 116 139;
+  --success-soft: 6 44 34;
+  --warning-soft: 51 34 6;
+  --danger-soft: 56 14 26;
+  --info-soft: 8 39 59;
+  --accent-soft: 30 36 66;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-raised: 0 6px 16px -4px rgb(0 0 0 / 0.5);
+  --shadow-overlay: 0 24px 48px -12px rgb(0 0 0 / 0.65);
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

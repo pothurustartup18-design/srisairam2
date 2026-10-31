@@ -1,0 +1,128 @@
+name: Release - Web live update
+
+# Publishes a signed live-update bundle (HTML/CSS/JS only) to installed Android
+# apps. Manual trigger only; production requires approval through the
+# "production" GitHub Environment. See docs/APP_UPDATES.md.
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel
+        type: choice
+        options: [staging, production]
+        default: staging
+      release_notes:
+        description: Release notes (separate items with |)
+        type: string
+        default: ''
+      rollout_percent:
+        description: Initial rollout percentage (1-100)
+        type: number
+        default: 100
+      native_min:
+        description: Oldest native versionCode this bundle supports (blank = current VERSION_CODE)
+        type: string
+        default: ''
+
+concurrency:
+  group: app-release-${{ inputs.channel }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release-web:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.channel }}
+    env:
+      CHANNEL: ${{ inputs.channel }}
+      # Inputs go through env, never straight into scripts (prevents injection).
+      NOTES: ${{ inputs.release_notes }}
+      ROLLOUT: ${{ inputs.rollout_percent }}
+      NATIVE_MIN_INPUT: ${{ inputs.native_min }}
+      API: ${{ vars.RELEASE_API_BASE }}
+      BUCKET: ${{ vars.RELEASE_BUCKET }}
+      AWS_REGION: ${{ vars.RELEASE_AWS_REGION }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Tests, update-code type check and lint
+        run: |
+          npm test
+          npm run typecheck:updates
+          npm run lint:updates
+
+      - name: Resolve native compatibility range
+        id: native
+        run: |
+          VC=$(grep '^VERSION_CODE=' android/app/version.properties | cut -d= -f2)
+          MIN="$NATIVE_MIN_INPUT"; MIN=${MIN:-$VC}
+          [[ "$MIN" =~ ^[0-9]+$ && "$MIN" -le "$VC" ]] || { echo "native_min must be an integer <= $VC"; exit 1; }
+          echo "min=$MIN" >> "$GITHUB_OUTPUT"
+          echo "max=$VC" >> "$GITHUB_OUTPUT"
+          echo "Bundle compatible with native versionCode $MIN..$VC"
+
+      - name: Build production web bundle
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          VITE_UPDATE_CHANNEL: ${{ inputs.channel }}
+        run: |
+          [ -n "$VITE_API_URL" ] || { echo "vars.VITE_API_URL is not set"; exit 1; }
+          npm run build
+          test -f dist/index.html || { echo "dist/index.html missing"; exit 1; }
+          (cd dist && zip -r -X -q ../bundle.zip .)
+          unzip -l bundle.zip | grep -q ' index.html$' || { echo "index.html not at zip root"; exit 1; }
+
+      - name: Encrypt, sign and verify bundle
+        env:
+          RELEASE_SIGNING_PRIVATE_KEY: ${{ secrets.RELEASE_SIGNING_PRIVATE_KEY }}
+        run: |
+          printf '%s' "$NOTES" > notes.txt
+          node scripts/release/release-tool.mjs web --zip bundle.zip --channel "$CHANNEL" \
+            --native-min "${{ steps.native.outputs.min }}" --native-max "${{ steps.native.outputs.max }}" \
+            --notes-file notes.txt --out release-out
+          # Proves the CI key matches the public key compiled into the app.
+          node scripts/release/release-tool.mjs verify-web --dir release-out --public-key release/keys/release-signing-public.pem
+          cat release-out/release.env >> "$GITHUB_ENV"
+
+      - name: Upload artifact (immutable)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.RELEASE_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.RELEASE_AWS_SECRET_ACCESS_KEY }}
+        run: |
+          aws s3api put-object --bucket "$BUCKET" --key "$ARTIFACT_KEY" --body "$ARTIFACT_PATH" \
+            --content-type application/octet-stream \
+            --checksum-algorithm SHA256 --checksum-sha256 "$ARTIFACT_SHA256_B64" \
+            --if-none-match '*' > /dev/null
+          REMOTE=$(aws s3api head-object --bucket "$BUCKET" --key "$ARTIFACT_KEY" --checksum-mode ENABLED --query ChecksumSHA256 --output text)
+          [ "$REMOTE" = "$ARTIFACT_SHA256_B64" ] || { echo "Uploaded checksum mismatch"; exit 1; }
+          aws s3 cp "s3://$BUCKET/$ARTIFACT_KEY" downloaded.bin --only-show-errors
+          echo "$ARTIFACT_SHA256  downloaded.bin" | sha256sum -c -
+
+      - name: Register and publish release
+        env:
+          TOKEN: ${{ secrets.APP_RELEASE_CI_TOKEN }}
+        run: |
+          [[ "$ROLLOUT" =~ ^[0-9]+$ ]] || { echo "Invalid rollout_percent"; exit 1; }
+          curl -sS --fail-with-body -X POST "$API/app-updates/admin/releases" \
+            -H "Content-Type: application/json" -H "X-Release-Token: $TOKEN" \
+            --data-binary @release-out/release.json
+          echo
+          curl -sS --fail-with-body -X POST "$API/app-updates/admin/releases/$RELEASE_ID/publish" \
+            -H "Content-Type: application/json" -H "X-Release-Token: $TOKEN" \
+            -d "{\"rolloutPercent\": $ROLLOUT}"
+          echo
+
+      - name: Post-publication check
+        run: |
+          curl -sS --fail-with-body "$API/app-updates/releases/$RELEASE_ID" | grep -q '"status":"published"'
+          echo "### Published web bundle \`$RELEASE_ID\` to **$CHANNEL** ($ROLLOUT%)" >> "$GITHUB_STEP_SUMMARY"
