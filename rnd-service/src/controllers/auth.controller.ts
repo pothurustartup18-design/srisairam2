@@ -12,6 +12,7 @@ import { getEffectivePermissions } from '../services/permissionEngine';
 import { ALL_PERMISSIONS } from '../config/permissions';
 import { queueTemplateNotification } from '../config/queue';
 import { normalizePhone } from '../services/whatsapp.service';
+import { verifyAndConsumePasswordChangeOtp } from '../services/passwordChangeOtp.service';
 import { JWT_SECRET, JWT_REFRESH_SECRET } from '../config/secrets';
 
 const hashToken = (token: string): string => {
@@ -553,10 +554,13 @@ export const resetPassword = async (req: Request, res: Response) => {
 };
 
 // 7. CHANGE PASSWORD CONTROLLER (Authenticated)
-// Same current-password-only flow for every role.
+// Current-password flow for every role. Parents changing their password from the
+// profile page must additionally present the WhatsApp OTP issued by
+// POST /api/parent/profile/send-password-otp. The forced first-login change
+// (mustChangePassword) stays current-password-only: that page has no OTP step.
 export const changePassword = async (req: Request, res: Response) => {
   try {
-    const { currentPassword, newPassword } = req.body;
+    const { currentPassword, newPassword, otpCode } = req.body;
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ success: false, message: 'Current password and new password are required.' });
     }
@@ -581,6 +585,19 @@ export const changePassword = async (req: Request, res: Response) => {
     const isMatch = await dbUser.comparePassword(currentPassword);
     if (!isMatch) {
       return res.status(400).json({ success: false, message: 'Incorrect current password.' });
+    }
+
+    if (dbUser.role === 'parent' && !dbUser.mustChangePassword) {
+      if (!otpCode) {
+        return res.status(400).json({ success: false, message: 'WhatsApp security OTP is required to change your password.' });
+      }
+      const otp = await verifyAndConsumePasswordChangeOtp(dbUser._id as any, otpCode);
+      if (!otp.ok) {
+        const message = otp.reason === 'locked'
+          ? 'Too many incorrect OTP attempts. Please request a new code.'
+          : 'Invalid or expired WhatsApp security OTP. Please request a new code.';
+        return res.status(400).json({ success: false, message });
+      }
     }
 
     dbUser.password = newPassword;
