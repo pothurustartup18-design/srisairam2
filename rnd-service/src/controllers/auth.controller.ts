@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import passport from 'passport';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import { isNativeClient, readRefreshToken, sessionDays, sessionSeconds, WEB_SESSION_DAYS } from '../utils/sessionPolicy';
 import { User, IUser } from '../models/user.model';
 import { RefreshToken } from '../models/refreshToken.model';
 import { Teacher } from '../models/teacher.model';
@@ -62,11 +63,11 @@ const generateAccessToken = (user: IUser): string => {
 };
 
 // Helper to generate refresh token
-const generateRefreshToken = (user: IUser): string => {
+const generateRefreshToken = (user: IUser, days: number = WEB_SESSION_DAYS): string => {
   return jwt.sign(
     { sub: user._id },
     refreshTokenSecret,
-    { expiresIn: '7d' }
+    { expiresIn: sessionSeconds(days) }
   );
 };
 
@@ -82,18 +83,19 @@ export const login = (req: Request, res: Response, next: NextFunction) => {
 
     try {
       const accessToken = generateAccessToken(user);
-      const refreshToken = generateRefreshToken(user);
+      const days = sessionDays(req); // 30 for the mobile app, 7 for browsers
+      const refreshToken = generateRefreshToken(user, days);
 
       // Save refresh token in Redis (with DB fallback)
       const hashedToken = hashToken(refreshToken);
       const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + 7); // 7 days
+      expiresAt.setDate(expiresAt.getDate() + days);
       const redisClient = require('../config/redis').default;
 
       let storedInRedis = false;
       if (redisClient && redisClient.status === 'ready') {
         try {
-          const ttlSeconds = 7 * 24 * 60 * 60; // 7 days
+          const ttlSeconds = sessionSeconds(days);
           await redisClient.setex(`session:refresh:${user._id}:${hashedToken}`, ttlSeconds, '1');
           storedInRedis = true;
           console.log(`[Redis] Saved active refresh token for user ${user._id}`);
@@ -118,7 +120,7 @@ export const login = (req: Request, res: Response, next: NextFunction) => {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production', // true in production
         sameSite: 'strict',
-        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+        maxAge: sessionSeconds(days) * 1000
       });
 
       // Update lastLogin in DB if connected
@@ -153,6 +155,8 @@ export const login = (req: Request, res: Response, next: NextFunction) => {
       return res.status(200).json({
         success: true,
         accessToken,
+        // The app's WebView can't keep the SameSite=strict cookie, so it stores this itself.
+        ...(isNativeClient(req) ? { refreshToken } : {}),
         user: {
           id: responseId,
           role: user.role,
@@ -179,7 +183,7 @@ export const login = (req: Request, res: Response, next: NextFunction) => {
 // 2. REFRESH TOKEN CONTROLLER
 export const refresh = async (req: Request, res: Response) => {
   try {
-    const { refreshToken } = req.cookies;
+    const refreshToken = readRefreshToken(req);
 
     if (!refreshToken) {
       return res.status(401).json({ success: false, message: 'Refresh token not found.' });
@@ -231,7 +235,8 @@ export const refresh = async (req: Request, res: Response) => {
 
     // Rotate tokens (generate new ones)
     const newAccessToken = generateAccessToken(user);
-    const newRefreshToken = generateRefreshToken(user);
+    const days = sessionDays(req);
+    const newRefreshToken = generateRefreshToken(user, days);
 
     // Delete old token
     if (redisClient && redisClient.status === 'ready') {
@@ -246,12 +251,12 @@ export const refresh = async (req: Request, res: Response) => {
     // Save new token
     const newHashedToken = hashToken(newRefreshToken);
     const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7);
+    expiresAt.setDate(expiresAt.getDate() + days);
 
     let storedInRedis = false;
     if (redisClient && redisClient.status === 'ready') {
       try {
-        const ttlSeconds = 7 * 24 * 60 * 60; // 7 days
+        const ttlSeconds = sessionSeconds(days);
         await redisClient.setex(`session:refresh:${user._id}:${newHashedToken}`, ttlSeconds, '1');
         storedInRedis = true;
       } catch (redisErr) {
@@ -274,12 +279,13 @@ export const refresh = async (req: Request, res: Response) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000
+      maxAge: sessionSeconds(days) * 1000
     });
 
     return res.status(200).json({
       success: true,
-      accessToken: newAccessToken
+      accessToken: newAccessToken,
+      ...(isNativeClient(req) ? { refreshToken: newRefreshToken } : {})
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });
@@ -289,7 +295,7 @@ export const refresh = async (req: Request, res: Response) => {
 // 3. LOGOUT CONTROLLER
 export const logout = async (req: Request, res: Response) => {
   try {
-    const { refreshToken } = req.cookies;
+    const refreshToken = readRefreshToken(req);
 
     if (refreshToken) {
       try {
