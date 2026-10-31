@@ -61,6 +61,7 @@ import sharedMessageRoutes from './routes/shared/message.routes';
 import sharedReceiptRoutes from './routes/shared/receipt.routes';
 import sharedHomeworkRoutes from './routes/shared/homework.routes';
 import whatsappWebhookRoutes from './routes/shared/whatsappWebhook.routes';
+import appUpdateRoutes from './routes/shared/appUpdates.routes';
 
 // Import Monitoring Middleware
 import { monitorAndLogMiddleware, metricsHandler, recordException } from './middlewares/monitoring.middleware';
@@ -133,6 +134,8 @@ app.use('/api/school-profile', schoolProfileRoutes);
 // Mixed public/private router (like schoolProfileRoutes): /verify is public,
 // the main aggregation route guards itself inline via authenticateJWT.
 app.use('/api/report-card', reportCardRoutes);
+// Mixed: update checks/telemetry are public; /admin/* guards itself (CI token or superadmin).
+app.use('/api/app-updates', appUpdateRoutes);
 
 // PUBLIC: the permanent Event Announcement gallery link (destination of the
 // WhatsApp media_url). Only handles GET /api/events/:eventId/media — every other
