@@ -27,6 +27,10 @@ services:
       # Without these two the Meta webhook cannot be verified or signature-checked.
       - WHATSAPP_WEBHOOK_VERIFY_TOKEN=${WHATSAPP_WEBHOOK_VERIFY_TOKEN}
       - WHATSAPP_APP_SECRET=${WHATSAPP_APP_SECRET}
+      # Android app updates (/api/app-updates). Optional until the first app release is published.
+      - APP_RELEASE_PUBLIC_KEY=${APP_RELEASE_PUBLIC_KEY:-}
+      - APP_RELEASE_CI_TOKEN=${APP_RELEASE_CI_TOKEN:-}
+      - APP_RELEASE_PACKAGE_ID=${APP_RELEASE_PACKAGE_ID:-}
     expose:
       - "5000"
     depends_on:

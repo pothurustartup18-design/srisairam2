@@ -1,35 +1,18 @@
-# School ERP — Frontend Client (rnd-ui)
+# School ERP — Mobile app (app-ui)
 
-This is the React + TypeScript + Vite frontend client for the School ERP and Automation system. It connects directly with the backend API.
+React + TypeScript + Vite frontend packaged for Android with Capacitor (`appId` `com.schoolhub.app`). It talks to the same backend (`../rnd-service`) as the web app (`../rnd-ui`).
 
-## Features Included
-* **Unified Portal Login**: Access page with role selector dropdown (Admin, Teacher, Parent).
-* **Role-Based Access Control (RBAC)**: Interface sidebar items, dashboard views, and routes automatically match the active role's permissions.
-* **Persistent Authentication**: Cookie-based Silent JWT refresh keeps users securely logged in across page reloads.
+See [`../docs/MOBILE_INTEGRATION.md`](../docs/MOBILE_INTEGRATION.md) for authentication, environment variables, the Android build and deployment order, and [`docs/APP_UPDATES.md`](docs/APP_UPDATES.md) for the in-app update system.
 
-## Quick Start Guide
+## Quick start
 
-### 1. Prerequisite Setup
-Ensure your local backend server is running on **`http://localhost:5000`**.
-
-### 2. Install Packages
-In this folder, run:
 ```bash
-npm install
+npm ci
+cp .env.example .env.local   # optional: override VITE_API_URL for local work
+npm run dev                  # browser dev server, /api proxied to localhost:5000
+npm test                     # unit tests
+npm run build                # production bundle (uses .env.production)
+npx cap sync android         # copy the bundle into android/
 ```
 
-### 3. Start Development Server
-Start the client server:
-```bash
-npm run dev
-```
-By default, the application will run at **`http://localhost:5173`** or **`http://localhost:5174`**.
-
----
-
-## Connection Settings
-* **Target Backend API**: Configured inside [src/constants/index.ts](src/constants/index.ts):
-  ```typescript
-  export const API_BASE = 'http://localhost:5000/api';
-  ```
-* **CORS Permissions**: The backend server is configured to allow requests from both ports `5173` and `5174` seamlessly.
+`VITE_API_URL` (API base including `/api`) is required for native builds; production is set in `.env.production`.
