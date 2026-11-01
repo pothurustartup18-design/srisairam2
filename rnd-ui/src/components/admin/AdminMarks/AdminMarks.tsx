@@ -190,6 +190,7 @@ const AdminMarks: React.FC<AdminMarksProps> = ({ students, teachers, classesList
   const [downloadingSingleStudentId, setDownloadingSingleStudentId] = useState<string | null>(null);
   const [sharingStudentId,   setSharingStudentId]   = useState<string | null>(null);
   const [sendingWhatsappId,  setSendingWhatsappId]  = useState<string | null>(null);
+  const [bulkWhatsapp, setBulkWhatsapp] = useState<{ done: number; total: number } | null>(null);
   const [previewUrl,         setPreviewUrl]         = useState<string | null>(null);
   const [previewStudentName, setPreviewStudentName] = useState<string>('');
   const [showHistory,        setShowHistory]        = useState(false);
@@ -463,6 +464,39 @@ const AdminMarks: React.FC<AdminMarksProps> = ({ students, teachers, classesList
       else throw new Error(d.message || 'Failed');
     } catch (err: any) { showToast(err.message || 'Failed.', 'error'); }
     finally { setSendingWhatsappId(null); }
+  };
+
+  // Generates + uploads every student's report card, then sends each one to that
+  // student's own parent WhatsApp number (siblings sharing a number get one
+  // message each). Runs one student at a time and keeps going past failures.
+  const handleBulkSendWhatsApp = async () => {
+    if (!selectedExam || classStudents.length === 0) { showToast('No students found.', 'error'); return; }
+    if (!window.confirm(`Send report cards to the parents of all ${classStudents.length} students on WhatsApp?`)) return;
+    setBulkWhatsapp({ done: 0, total: classStudents.length });
+    try {
+      if (!(await persistGrades())) return;
+      const token = getAccessToken();
+      const headers: HeadersInit = { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+      const failed: string[] = [];
+      let sent = 0;
+      for (const s of classStudents) {
+        try {
+          await uploadSingleStudentReportPDF(selectedExam, s, studentRemarks, assignedTeacher?.name || 'Class Teacher');
+          const res = await fetch(`${API_BASE}/marks/${selectedExam._id}/report-card/${s.id}/whatsapp`, { method: 'POST', headers });
+          const d = await res.json();
+          if (!res.ok || !d.success) throw new Error(d.message || 'Failed');
+          sent++;
+        } catch (err: any) {
+          failed.push(`${s.name} (${err.message || 'failed'})`);
+        }
+        setBulkWhatsapp(p => p && { ...p, done: p.done + 1 });
+      }
+      if (sent > 0) showToast(`Report cards sent to ${sent} parent${sent !== 1 ? 's' : ''} on WhatsApp.`);
+      if (failed.length > 0) showToast(`Not sent: ${failed.join(', ')}`, 'error');
+      handleLoadExamDetails(selectedExam._id);
+    } finally {
+      setBulkWhatsapp(null);
+    }
   };
 
   const handleShowAnalytics = async (examId: string) => {
@@ -1251,6 +1285,11 @@ const AdminMarks: React.FC<AdminMarksProps> = ({ students, teachers, classesList
             <div className="flex items-center gap-2 pb-4">
               <Button type="submit" disabled={saving || selectedExam.status === 'locked'}>
                 <Save size={13} /> {saving ? 'Saving…' : 'Save & Overwrite Register'}
+              </Button>
+              <Button type="button" variant="secondary" size="sm" disabled={saving || !!bulkWhatsapp}
+                title="Send report cards to all parents on WhatsApp" onClick={handleBulkSendWhatsApp}>
+                {bulkWhatsapp ? <Loader2 size={13} className="animate-spin" /> : <MessageCircle size={13} className="text-emerald-600" />}
+                {bulkWhatsapp ? `${bulkWhatsapp.done}/${bulkWhatsapp.total}` : 'Send all'}
               </Button>
               {selectedExam.status === 'locked' && (
                 <span className="flex items-center gap-1 text-xs text-slate-400 dark:text-slate-500 font-semibold"><Lock size={11} /> Unlock to enable edits</span>

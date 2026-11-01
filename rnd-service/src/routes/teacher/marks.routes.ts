@@ -565,7 +565,8 @@ router.post('/:examId/report-card/:studentId/whatsapp', requirePermission('marks
 
     const result = await queueTemplateNotification('report.card', {
       to: whatsappNo,
-      dedupeKey: `report-card:${examId}:${studentId}`,
+      // Unique per click: every press of the WhatsApp button must send, even for unchanged marks.
+      dedupeKey: `report-card:${examId}:${studentId}:${Date.now()}`,
       headerDocument: { link: presignedUrl, filename: `report_card_${admissionNo}.pdf` },
       params: { student_name_en: studentName, student_name_te: studentName }
     });
