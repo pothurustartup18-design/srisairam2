@@ -87,7 +87,39 @@ const AdminStudents: React.FC<AdminStudentsProps> = ({
 
   useEffect(() => { setCurrentPage(1); }, [classFilter, searchQuery, sectionFilter]);
 
-  const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); onCreateStudent(e); setShowAdmitDrawer(false); };
+  const findTeacherForClass = (className: string, section: string, teacherList: TeacherData[]) => {
+    if (!teacherList || teacherList.length === 0) return null;
+    const targetWithSec = `${className}-${section || '-'}`;
+    let found = teacherList.find(t =>
+      t.classTeacherOf && (t.classTeacherOf === targetWithSec || t.classTeacherOf === `${className}--` || t.classTeacherOf === className)
+    );
+    if (found) return found;
+
+    found = teacherList.find(t =>
+      t.assignedClass && (t.assignedClass === targetWithSec || t.assignedClass === `${className}--` || t.assignedClass === className)
+    );
+    if (found) return found;
+
+    found = teacherList.find(t =>
+      Array.isArray(t.teachingClasses) && (t.teachingClasses.includes(targetWithSec) || t.teachingClasses.includes(className))
+    );
+    return found || null;
+  };
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const ok = await onCreateStudent(e);
+      if (ok === true) {
+        setShowAdmitDrawer(false);
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
   const handleSelectStudent = (id: string) => setSelectedStudentIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   const handleSelectAllStudents = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.checked) setSelectedStudentIds(filteredRoster.map(s => s.id || s._id).filter(Boolean));
@@ -303,7 +335,12 @@ const AdminStudents: React.FC<AdminStudentsProps> = ({
             const availSecs = getSelectableClasses(classesList).filter(c => c.className === sel).map(c => c.section);
             let nextSec = newStudent.section;
             if (availSecs.length > 0 && !availSecs.includes(nextSec)) nextSec = availSecs[0];
-            onNewStudentChange({ class: sel, section: nextSec });
+            const autoTeacher = findTeacherForClass(sel, nextSec, teachers);
+            onNewStudentChange({
+              class: sel,
+              section: nextSec,
+              classTeacherId: autoTeacher ? autoTeacher._id : ''
+            });
           }}>
             {sortClasses(Array.from(new Set(getSelectableClasses(classesList).map(c => c.className)))).map(cls => (
               <option key={cls} value={cls}>{isNaN(Number(cls)) ? cls : `Class ${cls}`}</option>
@@ -312,7 +349,14 @@ const AdminStudents: React.FC<AdminStudentsProps> = ({
         </div>
         <div className={fieldCls}>
           <label className={labelCls}>Section</label>
-          <select className={selectCls} value={newStudent.section} onChange={e => onNewStudentChange({ section: e.target.value })}>
+          <select className={selectCls} value={newStudent.section} onChange={e => {
+            const nextSec = e.target.value;
+            const autoTeacher = findTeacherForClass(newStudent.class, nextSec, teachers);
+            onNewStudentChange({
+              section: nextSec,
+              classTeacherId: autoTeacher ? autoTeacher._id : ''
+            });
+          }}>
             {(() => {
               const filtered = getSelectableClasses(classesList).filter(c => c.className === newStudent.class);
               if (filtered.length === 0) return <option value="-">No Section</option>;
@@ -323,13 +367,40 @@ const AdminStudents: React.FC<AdminStudentsProps> = ({
       </div>
 
       {/* Class Teacher */}
-      <div className={fieldCls}>
-        <label className={labelCls}>Class Teacher</label>
-        <select className={selectCls} value={newStudent.classTeacherId} onChange={e => onNewStudentChange({ classTeacherId: e.target.value })}>
-          {teachers.length === 0 ? <option value="">No teachers available</option>
-            : teachers.map(t => <option key={t._id} value={t._id}>{t.name} (Assigned: {t.assignedClass})</option>)}
-        </select>
-      </div>
+      {(() => {
+        const autoTeacher = findTeacherForClass(newStudent.class, newStudent.section, teachers);
+        return (
+          <div className={fieldCls}>
+            <div className="flex items-center justify-between mb-1">
+              <label className={labelCls}>Class Teacher</label>
+              {autoTeacher ? (
+                <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold">
+                  ✓ Auto-assigned to {autoTeacher.name}
+                </span>
+              ) : (
+                <span className="text-xs text-slate-400">
+                  (Not assigned yet · Optional)
+                </span>
+              )}
+            </div>
+            <select
+              className={selectCls}
+              value={newStudent.classTeacherId || ''}
+              onChange={e => onNewStudentChange({ classTeacherId: e.target.value })}
+            >
+              <option value="">-- No Class Teacher Assigned Yet --</option>
+              {teachers.map(t => {
+                const isAuto = autoTeacher && t._id === autoTeacher._id;
+                return (
+                  <option key={t._id} value={t._id}>
+                    {t.name} {t.assignedClass ? `(Assigned: ${t.assignedClass})` : ''} {isAuto ? '★ Class Teacher' : ''}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+        );
+      })()}
 
       {/* Transport + Language */}
       <div className="grid grid-cols-2 gap-4">
@@ -670,7 +741,10 @@ const AdminStudents: React.FC<AdminStudentsProps> = ({
       <Drawer isOpen={showAdmitDrawer} onClose={() => setShowAdmitDrawer(false)} title="Admit New Student"
         footer={
           <div className="flex gap-2">
-            <Button type="submit" form="admit-student-form" className="flex-1 justify-center"><Plus size={15} /> Admit Student</Button>
+            <Button type="submit" form="admit-student-form" disabled={isSubmitting} className="flex-1 justify-center">
+              {isSubmitting ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
+              {isSubmitting ? 'Admitting...' : 'Admit Student'}
+            </Button>
             <Button variant="secondary" className="flex-1 justify-center" onClick={() => setShowAdmitDrawer(false)}>Cancel</Button>
           </div>
         }

@@ -77,7 +77,7 @@ const StudentSchema = new Schema<IStudent>(
     lastName: { type: String, required: false },
     class: { type: String, required: true },
     section: { type: String, required: true },
-    classTeacher: { type: Schema.Types.ObjectId, ref: 'Teacher', required: true },
+    classTeacher: { type: Schema.Types.ObjectId, ref: 'Teacher', required: false, default: null },
     rollNumber: { type: Number },
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },
     whatsappNo: { type: String, required: true },

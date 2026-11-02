@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import './AdminCollectFee.css';
 import type { StudentData } from '../../../types';
-import { ArrowLeft, Search, CheckCircle2, CreditCard, Download, ExternalLink } from 'lucide-react';
+import {
+  ArrowLeft, Search, CheckCircle2, CreditCard, Download,
+  ExternalLink, X, Filter, ChevronRight
+} from 'lucide-react';
 import { Form } from '../../ui/Form';
 import { ActionButton } from '../../ui/ActionButton';
 import { API_BASE } from '../../../constants';
@@ -35,15 +38,18 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
   generateReceiptPDF,
   initialStudentId,
 }) => {
-  // ── Search / Filter
+  // ── Search / Filter State
   const [searchName, setSearchName] = useState('');
   const [searchClass, setSearchClass] = useState('all');
+  const [onlyPending, setOnlyPending] = useState(false);
 
-  // ── Step state
+  // ── Step State
   const [step, setStep] = useState<Step>('search');
   const [selectedStudent, setSelectedStudent] = useState<StudentData | null>(null);
   const [paymentType, setPaymentType] = useState<'school' | 'books' | 'transport'>('school');
   const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentMode, setPaymentMode] = useState('cash');
+  const [remarks, setRemarks] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [receipt, setReceipt] = useState<any | null>(null);
   const [whatsappStatus, setWhatsappStatus] = useState<'sent' | 'failed' | null>(null);
@@ -65,8 +71,16 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
   // ── Derived filtered list
   const query = searchName.trim().toLowerCase();
   const filteredStudents = students.filter(s => {
-    if (query && !s.name.toLowerCase().includes(query)) return false;
+    if (query) {
+      const matchName = (s.name || '').toLowerCase().includes(query);
+      const matchAdm = (s.admissionNo || '').toLowerCase().includes(query);
+      if (!matchName && !matchAdm) return false;
+    }
     if (searchClass !== 'all' && String(s.class) !== searchClass) return false;
+    if (onlyPending) {
+      const total = (s.feePending || 0) + (s.booksFee || 0) + (s.transportFee || 0);
+      if (total <= 0) return false;
+    }
     return true;
   });
 
@@ -84,6 +98,21 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
     setPaymentType(tuition > 0 ? 'school' : books > 0 ? 'books' : 'transport');
     setPaymentAmount('');
     setStep('payment');
+  };
+
+  const handleBack = () => {
+    if (step === 'payment') {
+      setStep('search');
+      setSelectedStudent(null);
+      setPaymentAmount('');
+    } else if (step === 'success') {
+      setStep('search');
+      setSelectedStudent(null);
+      setPaymentAmount('');
+      setReceipt(null);
+    } else {
+      onBack();
+    }
   };
 
   const handleSubmitPayment = async (e: React.FormEvent) => {
@@ -110,7 +139,10 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
           try {
             const pdfBase64 = await generateReceiptPDF(result, selectedStudent);
             const token = getAccessToken();
-            const headers: HeadersInit = { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+            const headers: HeadersInit = {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            };
             const res = await fetch(`${API_BASE}/dashboard/upload-receipt-pdf`, {
               method: 'POST',
               headers,
@@ -173,18 +205,30 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
 
       {/* ── Page Header ────────────────────────────────────────────────── */}
       <div className="cf-header">
-        <button className="cf-back-btn" onClick={onBack}>
+        <button
+          type="button"
+          className="cf-back-btn"
+          onClick={handleBack}
+          aria-label="Go back"
+        >
           <ArrowLeft size={16} />
-          Back
+          <span>{step === 'search' ? 'Back' : 'Change Student'}</span>
         </button>
+
         <div className="cf-header-title">
-          <div className="cf-header-icon">💳</div>
-          <div>
+          <div className="cf-header-icon" aria-hidden="true">💳</div>
+          <div className="cf-header-text">
             <h1 className="cf-h1">Collect Fee</h1>
-            <p className="cf-subtext">Search a student, select due category, and record payment.</p>
+            <p className="cf-subtext">
+              {step === 'search' && 'Search student & record payment.'}
+              {step === 'payment' && `Record fee for ${selectedStudent?.name || 'student'}.`}
+              {step === 'success' && 'Transaction completed successfully.'}
+            </p>
           </div>
         </div>
-        <div className="cf-step-indicator">
+
+        {/* Desktop Stepper */}
+        <div className="cf-step-indicator cf-desktop-stepper" aria-label="Fee collection progress">
           {(['search', 'payment', 'success'] as Step[]).map((s, i) => {
             const labels = ['Find Student', 'Enter Payment', 'Receipt'];
             const stepIdx = step === 'search' ? 0 : step === 'payment' ? 1 : 2;
@@ -209,6 +253,30 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
         </div>
       </div>
 
+      {/* Mobile Stepper Bar */}
+      <div className="cf-mobile-stepper" aria-label="Steps">
+        {[
+          { key: 'search', num: 1, label: '1. Student' },
+          { key: 'payment', num: 2, label: '2. Payment' },
+          { key: 'success', num: 3, label: '3. Receipt' },
+        ].map((item, idx) => {
+          const stepIdx = step === 'search' ? 0 : step === 'payment' ? 1 : 2;
+          const done = stepIdx > idx;
+          const active = stepIdx === idx;
+          return (
+            <div
+              key={item.key}
+              className={`cf-mstep-item ${active ? 'active' : done ? 'done' : ''}`}
+            >
+              <div className="cf-mstep-circle">
+                {done ? '✓' : item.num}
+              </div>
+              <span className="cf-mstep-text">{item.label}</span>
+            </div>
+          );
+        })}
+      </div>
+
       {/* ── Body ───────────────────────────────────────────────────────── */}
       <div className="cf-body">
 
@@ -224,27 +292,54 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
                 <input
                   className="cf-search-input"
                   type="text"
-                  placeholder="Search student by name…"
+                  placeholder="Search by student name or admission no…"
                   value={searchName}
                   onChange={e => setSearchName(e.target.value)}
                   autoFocus
                 />
+                {searchName && (
+                  <button
+                    type="button"
+                    className="cf-search-clear"
+                    onClick={() => setSearchName('')}
+                    aria-label="Clear search"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
               </div>
-              <select
-                className="cf-class-select"
-                value={searchClass}
-                onChange={e => setSearchClass(e.target.value)}
-              >
-                <option value="all">All Classes</option>
-                {uniqueClasses.map(cls => (
-                  <option key={cls} value={cls}>Class {cls}</option>
-                ))}
-              </select>
-              <div className="cf-count-badge">{filteredStudents.length} students</div>
+
+              <div className="cf-filter-row">
+                <select
+                  className="cf-class-select"
+                  value={searchClass}
+                  onChange={e => setSearchClass(e.target.value)}
+                  aria-label="Filter by class"
+                >
+                  <option value="all">All Classes</option>
+                  {uniqueClasses.map(cls => (
+                    <option key={cls} value={cls}>Class {cls}</option>
+                  ))}
+                </select>
+
+                <button
+                  type="button"
+                  className={`cf-filter-pill ${onlyPending ? 'active' : ''}`}
+                  onClick={() => setOnlyPending(p => !p)}
+                  title="Filter students with pending fee dues"
+                >
+                  <Filter size={12} />
+                  <span>{onlyPending ? 'Pending Dues' : 'All Dues'}</span>
+                </button>
+
+                <div className="cf-count-badge">
+                  {filteredStudents.length} {filteredStudents.length === 1 ? 'student' : 'students'}
+                </div>
+              </div>
             </div>
 
-            {/* Table */}
-            <div className="cf-table-wrap">
+            {/* Desktop Table View (hidden on mobile) */}
+            <div className="cf-table-wrap cf-desktop-table">
               <table className="cf-table">
                 <thead>
                   <tr>
@@ -263,7 +358,7 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
                     <tr>
                       <td colSpan={8} className="cf-empty">
                         <div className="cf-empty-icon">🔍</div>
-                        <div>No students found. Try a different name or class.</div>
+                        <div>No students found. Try a different name, admission no, or class.</div>
                       </td>
                     </tr>
                   ) : filteredStudents.map((student, idx) => {
@@ -310,6 +405,7 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
                         </td>
                         <td>
                           <button
+                            type="button"
                             className={`cf-collect-btn ${total <= 0 ? 'disabled' : ''}`}
                             disabled={total <= 0}
                             onClick={() => selectStudent(student)}
@@ -323,6 +419,109 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
                   })}
                 </tbody>
               </table>
+            </div>
+
+            {/* Mobile Card List View (visible only on mobile) */}
+            <div className="cf-mobile-card-list">
+              {filteredStudents.length === 0 ? (
+                <div className="cf-mobile-empty">
+                  <div className="cf-empty-icon">🔍</div>
+                  <div className="cf-empty-title">No students found</div>
+                  <div className="cf-empty-desc">Try a different name, admission number, or class.</div>
+                </div>
+              ) : (
+                filteredStudents.map((student, idx) => {
+                  const tuition = student.feePending || 0;
+                  const books = student.booksFee || 0;
+                  const transport = student.transportFee || 0;
+                  const total = tuition + books + transport;
+                  const initials = student.name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
+                  const ci = idx % 6;
+                  const hasDue = total > 0;
+
+                  return (
+                    <div
+                      key={student.id || (student as any)._id || idx}
+                      className={`cf-mcard ${hasDue ? 'has-due' : 'cleared'}`}
+                      onClick={() => {
+                        if (hasDue) selectStudent(student);
+                      }}
+                    >
+                      {/* Header row */}
+                      <div className="cf-mcard-header">
+                        <div className="cf-mcard-user">
+                          <div
+                            className="cf-avatar"
+                            style={{ backgroundColor: COLORS[ci], color: TEXT_COLORS[ci] }}
+                          >
+                            {initials}
+                          </div>
+                          <div className="cf-mcard-name-wrap">
+                            <span className="cf-mcard-name">{student.name}</span>
+                            <span className="cf-mcard-meta">
+                              Adm: <strong>{student.admissionNo || '—'}</strong>
+                            </span>
+                          </div>
+                        </div>
+                        <span className="cf-class-badge">
+                          Class {student.class}-{student.section}
+                        </span>
+                      </div>
+
+                      {/* Dues Breakdown Grid */}
+                      <div className="cf-mcard-dues">
+                        <div className="cf-mcard-due-col">
+                          <span className="cf-mcard-due-lbl">Tuition</span>
+                          <span className={`cf-amount ${tuition > 0 ? 'due' : 'paid'}`}>
+                            {tuition > 0 ? `₹${tuition.toLocaleString()}` : '✓ Paid'}
+                          </span>
+                        </div>
+                        <div className="cf-mcard-due-col">
+                          <span className="cf-mcard-due-lbl">Books</span>
+                          <span className={`cf-amount ${books > 0 ? 'books' : 'paid'}`}>
+                            {books > 0 ? `₹${books.toLocaleString()}` : '✓ Paid'}
+                          </span>
+                        </div>
+                        <div className="cf-mcard-due-col">
+                          <span className="cf-mcard-due-lbl">Transport</span>
+                          <span className={`cf-amount ${transport > 0 ? 'transport' : 'paid'}`}>
+                            {transport > 0 ? `₹${transport.toLocaleString()}` : '✓ Paid'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Footer Row */}
+                      <div className="cf-mcard-footer">
+                        <div className="cf-mcard-total-box">
+                          <span className="cf-mcard-total-label">Total Outstanding</span>
+                          <span className={`cf-total ${hasDue ? 'pending' : 'clear'}`}>
+                            {hasDue ? `₹${total.toLocaleString()}` : 'All Paid ✓'}
+                          </span>
+                        </div>
+
+                        {hasDue ? (
+                          <button
+                            type="button"
+                            className="cf-mcard-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              selectStudent(student);
+                            }}
+                          >
+                            <CreditCard size={14} />
+                            <span>Collect Fee</span>
+                            <ChevronRight size={14} />
+                          </button>
+                        ) : (
+                          <span className="cf-mcard-paid-tag">
+                            ✓ Cleared
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
         )}
@@ -353,8 +552,8 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
                   </div>
                   <div className="cf-student-card-info">
                     <div className="cf-student-card-name">{s.name}</div>
-                    <div className="cf-student-card-meta">Adm: {s.admissionNo} · Class {s.class}-{s.section}</div>
-                    <div className="cf-student-card-meta">Parent: {s.parentName || '—'}</div>
+                    <div className="cf-student-card-meta">Adm: <strong>{s.admissionNo}</strong> · Class <strong>{s.class}-{s.section}</strong></div>
+                    <div className="cf-student-card-meta">Parent: {s.parentName || '—'} {s.whatsappNo ? `(${s.whatsappNo})` : ''}</div>
                   </div>
                 </div>
 
@@ -373,12 +572,13 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
                     </div>
                   ))}
                   <div className="cf-dues-total-row">
-                    <span className="cf-dues-total-label">Total Pending</span>
+                    <span className="cf-dues-total-label">Total Outstanding</span>
                     <span className="cf-dues-total-val">₹{total.toLocaleString()}</span>
                   </div>
                 </div>
 
                 <button
+                  type="button"
                   className="cf-back-link"
                   onClick={() => { setStep('search'); setSelectedStudent(null); }}
                 >
@@ -391,10 +591,10 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
                 <div className="cf-form-card">
                   <div className="cf-form-title">
                     <CreditCard size={18} />
-                    Record Payment
+                    <span>Record Payment</span>
                   </div>
                   <p className="cf-form-subtitle">
-                    Select the fee category and enter the amount to collect.
+                    Select fee category and enter the payment amount collected.
                   </p>
 
                   <Form onSubmit={handleSubmitPayment} className="cf-form">
@@ -447,8 +647,6 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
                           placeholder={`Max ₹${maxAmount.toLocaleString()}`}
                           value={paymentAmount}
                           onChange={e => setPaymentAmount(e.target.value)}
-                          onFocus={e => (e.target.style.borderColor = '#2563eb')}
-                          onBlur={e => (e.target.style.borderColor = '#e2e8f0')}
                           autoFocus
                         />
                         {paymentAmount && Number(paymentAmount) === maxAmount && (
@@ -456,7 +654,7 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
                         )}
                       </div>
                       <div className="cf-amount-hint">
-                        <span>Max: ₹{maxAmount.toLocaleString()}</span>
+                        <span>Max Due: ₹{maxAmount.toLocaleString()}</span>
                         <button
                           type="button"
                           className="cf-full-link"
@@ -470,9 +668,13 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
                     {/* Mode of Payment */}
                     <div className="cf-field">
                       <label className="cf-label">Payment Mode</label>
-                      <select className="cf-select">
+                      <select
+                        className="cf-select"
+                        value={paymentMode}
+                        onChange={e => setPaymentMode(e.target.value)}
+                      >
                         <option value="cash">Cash</option>
-                        <option value="upi">UPI</option>
+                        <option value="upi">UPI / Online</option>
                         <option value="bank">Bank Transfer</option>
                         <option value="cheque">Cheque</option>
                       </select>
@@ -481,7 +683,13 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
                     {/* Remarks */}
                     <div className="cf-field">
                       <label className="cf-label">Remarks (optional)</label>
-                      <input type="text" className="cf-text-input" placeholder="e.g. Term 2 payment…" />
+                      <input
+                        type="text"
+                        className="cf-text-input"
+                        placeholder="e.g. Term 2 payment, receipt note…"
+                        value={remarks}
+                        onChange={e => setRemarks(e.target.value)}
+                      />
                     </div>
 
                     {/* Submit */}
@@ -495,7 +703,7 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
                       ) : (
                         <>
                           <CheckCircle2 size={16} />
-                          Confirm &amp; Generate Receipt
+                          <span>Confirm &amp; Generate Receipt</span>
                         </>
                       )}
                     </button>
@@ -519,7 +727,7 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
               <h2 className="cf-success-title">Payment Recorded!</h2>
               <p className="cf-success-sub">
                 {whatsappStatus === 'sent' && 'WhatsApp receipt has been sent to parent.'}
-                {whatsappStatus === 'failed' && 'Payment recorded — WhatsApp receipt could not be sent. Try Download PDF and share it manually.'}
+                {whatsappStatus === 'failed' && 'Payment recorded — WhatsApp receipt could not be sent. You can download the PDF receipt below.'}
                 {whatsappStatus === null && 'Sending WhatsApp receipt to parent…'}
               </p>
 
@@ -535,7 +743,7 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
                   { label: 'Admission No.', value: selectedStudent.admissionNo || '—' },
                   { label: 'Fee Category', value: feeLabel(receipt.feeType) },
                   { label: 'Amount Paid', value: `₹${Number(receipt.amount).toLocaleString()}`, highlight: true },
-                  { label: 'Payment Mode', value: receipt.paymentMode || 'Cash' },
+                  { label: 'Payment Mode', value: receipt.paymentMode || paymentMode.toUpperCase() || 'Cash' },
                 ].map(({ label, value, highlight }) => (
                   <div key={label} className="cf-receipt-row">
                     <span className="cf-receipt-label">{label}</span>
@@ -548,7 +756,7 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
               <div className="cf-success-actions">
                 <ActionButton className="cf-dl-btn" onClick={handleDownloadPDF}>
                   <Download size={15} />
-                  Download PDF Receipt
+                  <span>Download PDF Receipt</span>
                 </ActionButton>
                 <a
                   href={`/?verify_token=${receipt.receiptNo || receipt.token}`}
@@ -557,20 +765,26 @@ export const AdminCollectFee: React.FC<AdminCollectFeeProps> = ({
                   className="cf-verify-link"
                 >
                   <ExternalLink size={14} />
-                  Verify Receipt Online
+                  <span>Verify Receipt Online</span>
                 </a>
                 <button
+                  type="button"
                   className="cf-another-btn"
                   onClick={() => {
                     setStep('search');
                     setSelectedStudent(null);
                     setPaymentAmount('');
                     setReceipt(null);
+                    setRemarks('');
                   }}
                 >
                   Collect Another Fee
                 </button>
-                <button className="cf-analytics-btn" onClick={onGoToFeeAnalytics}>
+                <button
+                  type="button"
+                  className="cf-analytics-btn"
+                  onClick={onGoToFeeAnalytics}
+                >
                   View Fee Analytics →
                 </button>
               </div>

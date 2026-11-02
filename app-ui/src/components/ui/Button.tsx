@@ -44,27 +44,23 @@ const buttonVariants = cva(
 export function usePendingClick(
   onClick: ((e: MouseEvent<HTMLButtonElement>) => unknown) | undefined,
   type: ButtonHTMLAttributes<HTMLButtonElement>['type'],
-  forced = false,
+  forced?: boolean,
 ) {
   const [clickPending, setClickPending] = useState(false);
   const formPending = useContext(FormPendingContext);
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => { mounted.current = false; };
-  }, []);
 
   // A button with no type inside a form is a submit button too.
   const isSubmit = type === undefined || type === 'submit';
-  const busy = forced || clickPending || (isSubmit && formPending);
+  // If forced is explicitly passed (true or false), it takes strict precedence
+  const busy = forced !== undefined ? forced : Boolean(clickPending || (isSubmit && formPending));
 
   const handleClick = (e: MouseEvent<HTMLButtonElement>) => {
     if (busy) { e.preventDefault(); return; }
     const result = onClick?.(e);
     if (result && typeof (result as Promise<unknown>).then === 'function') {
       setClickPending(true);
-      const done = () => { if (mounted.current) setClickPending(false); };
-      (result as Promise<unknown>).then(done, done);
+      const done = () => { setClickPending(false); };
+      (result as Promise<unknown>).then(done, done).catch(done);
     }
   };
 
@@ -88,7 +84,7 @@ export function Button({
   className,
   variant,
   size,
-  loading = false,
+  loading,
   loadingText,
   disabled,
   children,

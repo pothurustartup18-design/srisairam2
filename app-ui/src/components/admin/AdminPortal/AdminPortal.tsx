@@ -240,7 +240,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
     admissionAcademicYear: '2026-27',
     firstName: '', lastName: '',
     class: '10', section: 'A',
-    classTeacherId: teachers[0]?._id || '',
+    classTeacherId: '',
     feePaid: 0, feePending: 0, whatsappNo: '',
     motherWhatsappNo: '',
     transportMode: 'school',
@@ -546,12 +546,34 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
   };
 
   // ─── Create/Update Student ───────────────────────────────────────────────────
-  const handleCreateStudent = async (e: React.FormEvent) => {
+  const handleCreateStudent = async (e: React.FormEvent): Promise<boolean> => {
     e.preventDefault();
-    const { admissionNo, firstName, lastName, classTeacherId, whatsappNo } = newStudent;
-    if (!admissionNo || !firstName || !lastName || !classTeacherId || !whatsappNo) {
-      showToast('Please fill out all required student fields.', 'error'); return;
+    const { firstName, whatsappNo } = newStudent;
+
+    const missing: string[] = [];
+    if (!firstName || !firstName.trim()) missing.push('First Name');
+    if (!whatsappNo || !whatsappNo.trim()) missing.push('Father/Primary WhatsApp');
+    if (!newStudent.class) missing.push('Class');
+
+    if (missing.length > 0) {
+      showToast(`Required fields missing: ${missing.join(', ')}.`, 'error');
+      return false;
     }
+
+    const cleanPhone = (whatsappNo || '').replace(/\D/g, '');
+    if (cleanPhone.length !== 10) {
+      showToast('Primary WhatsApp number must be exactly 10 digits.', 'error');
+      return false;
+    }
+
+    if (newStudent.motherWhatsappNo && newStudent.motherWhatsappNo.trim() !== '') {
+      const cleanMother = newStudent.motherWhatsappNo.replace(/\D/g, '');
+      if (cleanMother.length !== 10) {
+        showToast('Mother WhatsApp number must be exactly 10 digits.', 'error');
+        return false;
+      }
+    }
+
     const isEditing = !!editingStudentId;
     const url = isEditing ? `${API_BASE}/students/${editingStudentId}` : `${API_BASE}/students`;
     const method = isEditing ? 'PUT' : 'POST';
@@ -559,16 +581,25 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
     try {
       const res = await fetch(url, {
         method, headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...newStudent, feePaid: Number(newStudent.feePaid), feePending: Number(newStudent.feePending) }),
+        body: JSON.stringify({
+          ...newStudent,
+          firstName: firstName.trim(),
+          lastName: (newStudent.lastName || '').trim(),
+          whatsappNo: cleanPhone,
+          motherWhatsappNo: (newStudent.motherWhatsappNo || '').replace(/\D/g, ''),
+          feePaid: Number(newStudent.feePaid) || 0,
+          feePending: Number(newStudent.feePending) || 0
+        }),
       });
       const data = await res.json();
       if (data.success) {
+        showToast(isEditing ? `Student ${firstName} updated successfully.` : `Student ${firstName} admitted successfully!`);
         setNewStudent({
           admissionNo: '',
           admissionAcademicYear: '2026-27',
           firstName: '', lastName: '',
           class: '10', section: 'A',
-          classTeacherId: teachers[0]?._id || '',
+          classTeacherId: '',
           feePaid: 0, feePending: 0, whatsappNo: '',
           motherWhatsappNo: '',
           transportMode: 'school',
@@ -586,9 +617,14 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
         setEditingStudentId(null);
         fetchNextAdmissionNo('2026-27');
         onDataReload();
-      } else showToast(data.message || 'Error saving student.', 'error');
+        return true;
+      } else {
+        showToast(data.message || 'Error saving student.', 'error');
+        return false;
+      }
     } catch (err: any) {
       showToast(err.message || 'Error saving student.', 'error');
+      return false;
     }
   };
 
@@ -1123,9 +1159,48 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
     file: File,
     onProgress: (loadedBytes: number, totalBytes: number) => void
   ): Promise<EventMediaUploadResult> => {
-    const { uploadUrl, previewUrl, s3Key, mediaType } = await presignEventMedia(file.name);
-    await putFileToS3WithProgress(file, uploadUrl, onProgress);
-    return { previewUrl, s3Key, filename: file.name, contentType: file.type || 'application/octet-stream', size: file.size, mediaType };
+    try {
+      const { uploadUrl, previewUrl, s3Key, mediaType } = await presignEventMedia(file.name);
+      await putFileToS3WithProgress(file, uploadUrl, onProgress);
+      return { previewUrl, s3Key, filename: file.name, contentType: file.type || 'application/octet-stream', size: file.size, mediaType };
+    } catch {
+      // Fallback: direct upload to server if S3 PUT fails
+      return new Promise<EventMediaUploadResult>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = async () => {
+          try {
+            const token = getAccessToken();
+            const headers: HeadersInit = {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {})
+            };
+            const res = await fetch(`${API_BASE}/events/media/upload-direct`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({ fileName: file.name, fileData: reader.result as string })
+            });
+            const data = await res.json();
+            if (data.success) {
+              onProgress(file.size, file.size);
+              resolve({
+                previewUrl: data.previewUrl,
+                s3Key: data.s3Key,
+                filename: file.name,
+                contentType: data.contentType || file.type || 'application/octet-stream',
+                size: file.size,
+                mediaType: data.mediaType || 'image'
+              });
+            } else {
+              reject(new Error(data.message || `Failed to upload ${file.name}`));
+            }
+          } catch (e: any) {
+            reject(e);
+          }
+        };
+        reader.onerror = () => reject(new Error(`Failed to read file ${file.name}`));
+        reader.readAsDataURL(file);
+      });
+    }
   };
 
   const handleMediaUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1186,9 +1261,11 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
 
     setUploadingMedia(true);
     try {
+      const token = getAccessToken();
+      const headers: HeadersInit = { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
       const res = await fetch(`${API_BASE}/events`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           title: newEvent.title,
           description: newEvent.description,
@@ -1231,8 +1308,11 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
 
   const handleDeleteEvent = async (id: string) => {
     try {
+      const token = getAccessToken();
+      const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
       const res = await fetch(`${API_BASE}/events/${id}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers
       });
       const data = await res.json();
       if (data.success) {

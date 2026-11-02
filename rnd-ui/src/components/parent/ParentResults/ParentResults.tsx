@@ -71,11 +71,17 @@ const ParentResults: React.FC<ParentResultsProps> = ({ examResults = [] }) => {
   const summaryStats = useMemo(() => {
     if (!examResults || examResults.length === 0) return null;
 
-    const totalPcts = examResults.reduce((sum, e) => sum + safeNumber(e.percentage), 0);
-    const avgPct = Math.round(totalPcts / examResults.length);
-    const latest = examResults[examResults.length - 1];
-    const prev = examResults.length > 1 ? examResults[examResults.length - 2] : null;
-    const diff = prev ? safeNumber(latest.percentage) - safeNumber(prev.percentage) : null;
+    // Chronologically sort assessments so latest and previous are accurate
+    const sorted = [...examResults].sort((a, b) => {
+      const timeA = new Date((a as any).examDate || (a as any).date || (a as any).createdAt || 0).getTime();
+      const timeB = new Date((b as any).examDate || (b as any).date || (b as any).createdAt || 0).getTime();
+      return timeA - timeB;
+    });
+
+    const totalPcts = sorted.reduce((sum, e) => sum + safeNumber(e.percentage), 0);
+    const avgPct = Math.round(totalPcts / sorted.length);
+    const latest = sorted[sorted.length - 1];
+    const prev = sorted.length > 1 ? sorted[sorted.length - 2] : null;
 
     // Resolve latest exam marks
     const latestObtained =
@@ -94,9 +100,17 @@ const ParentResults: React.FC<ParentResultsProps> = ({ examResults = [] }) => {
         ? latest.marks.length * 100
         : 100);
 
+    const latestPct = safeNumber(
+      latest.percentage,
+      latestPossible > 0 ? Math.round((latestObtained / latestPossible) * 100) : 0
+    );
+    const prevPct = prev ? safeNumber(prev.percentage) : null;
+    const rawDiff = prevPct !== null ? latestPct - prevPct : null;
+    const diff = rawDiff !== null ? Math.round(rawDiff * 10) / 10 : null;
+
     // Find best subject across all exams
-    let bestSubject = { name: 'N/A', pct: 0 };
-    examResults.forEach((e) => {
+    let bestSubject = { name: 'Mathematics', pct: 0 };
+    sorted.forEach((e) => {
       e.marks?.forEach((m: any) => {
         const obt = safeNumber(m.obtainedMarks ?? m.marks ?? m.score);
         const subDef = e.subjects?.find((s: any) => s.name?.trim().toLowerCase() === m.subject?.trim().toLowerCase());
@@ -111,12 +125,14 @@ const ParentResults: React.FC<ParentResultsProps> = ({ examResults = [] }) => {
     return {
       avgPct,
       latest,
+      latestPct,
       latestObtained: safeNumber(latestObtained),
       latestPossible: safeNumber(latestPossible, 100),
       prev,
       diff,
+      diffLabel: prev ? `vs ${prev.examName || 'Prev'}` : '1st Exam',
       bestSubject,
-      count: examResults.length,
+      count: sorted.length,
     };
   }, [examResults]);
 

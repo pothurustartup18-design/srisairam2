@@ -152,81 +152,73 @@ router.post('/', requirePermission('attendance:mark'), async (req: Request, res:
       console.error('Failed to clear dashboard cache:', cacheErr);
     }
 
-    // Send WhatsApp alerts if requested and there are absentees
-    if (req.body.sendAlerts) {
-      let isHalfDay = false;
-      const config = await SystemConfig.findOne({ key: 'attendanceMode' });
-      if (config) {
-        isHalfDay = config.value === 'half-day';
-      }
-
-      for (const rec of records) {
-        try {
-          let student: any = null;
-          student = await Student.findById(rec.studentId);
-          if (student && student.whatsappNo) {
-            const studentName = student.name || `${student.firstName || ''} ${student.lastName || ''}`.trim();
-            const existingStudentRec = previousRecord?.records?.find(
-              (r: any) => (r.student || '').toString() === rec.studentId
-            );
-
-            // Proactive absence alerts now go out as the approved Meta templates
-            // (attendance_alert_full / _morning / _afternoon). Each of those
-            // templates already contains BOTH the English and Telugu sentences,
-            // so we send ONE template regardless of student.preferredLanguage and
-            // pass the student's name to both named params (student_name_en,
-            // student_name_te). The Meta template name lives in the registry
-            // (config/whatsappTemplates.ts), not here.
-            const nameParams = { student_name_en: studentName, student_name_te: studentName };
-
-            if (isHalfDay) {
-              if (rec.morningStatus === 'absent') {
-                const alreadyMarkedMorningAbsent = existingStudentRec?.morningStatus === 'absent';
-                if (!alreadyMarkedMorningAbsent) {
-                  await queueTemplateNotification('attendance.morning', {
-                    to: student.whatsappNo,
-                    params: nameParams,
-                    dedupeKey: `attendance:${dateStr}:${rec.studentId}:morning`
-                  });
-                  console.log(`[Attendance WhatsApp Alert] Morning template queued for student ${studentName} to ${student.whatsappNo}`);
-                }
-              }
-
-              if (rec.afternoonStatus === 'absent') {
-                const alreadyMarkedAfternoonAbsent = existingStudentRec?.afternoonStatus === 'absent';
-                if (!alreadyMarkedAfternoonAbsent) {
-                  await queueTemplateNotification('attendance.afternoon', {
-                    to: student.whatsappNo,
-                    params: nameParams,
-                    dedupeKey: `attendance:${dateStr}:${rec.studentId}:afternoon`
-                  });
-                  console.log(`[Attendance WhatsApp Alert] Afternoon template queued for student ${studentName} to ${student.whatsappNo}`);
-                }
-              }
-            } else {
-              if (rec.status === 'absent') {
-                const alreadyMarkedAbsent = existingStudentRec?.status === 'absent';
-                if (!alreadyMarkedAbsent) {
-                  await queueTemplateNotification('attendance.full', {
-                    to: student.whatsappNo,
-                    params: nameParams,
-                    dedupeKey: `attendance:${dateStr}:${rec.studentId}:full`
-                  });
-                  console.log(`[Attendance WhatsApp Alert] Full-day template queued for student ${studentName} to ${student.whatsappNo}`);
-                }
-              }
-            }
-          }
-        } catch (err) {
-          console.error('[Attendance WhatsApp Alert Error]:', err);
-        }
-      }
-    }
-
-    return res.status(201).json({
+    // Return immediate success to client for snappy (< 100ms) UI response
+    res.status(201).json({
       success: true,
       message: 'Attendance register saved successfully.',
     });
+
+    // Send WhatsApp alerts asynchronously in the background (does not block client)
+    if (req.body.sendAlerts) {
+      (async () => {
+        try {
+          const absentRecords = records.filter((r: any) =>
+            r.status === 'absent' || r.morningStatus === 'absent' || r.afternoonStatus === 'absent'
+          );
+          if (absentRecords.length === 0) return;
+
+          const config = await SystemConfig.findOne({ key: 'attendanceMode' });
+          const isHalfDay = config ? config.value === 'half-day' : false;
+
+          // Batch query ONLY absent students in ONE single query
+          const absentIds = absentRecords.map((r: any) => r.studentId);
+          const absentStudents = await Student.find({ _id: { $in: absentIds } }).lean();
+          const studentMap = new Map(absentStudents.map((s: any) => [String(s._id), s]));
+
+          for (const rec of absentRecords) {
+            const student: any = studentMap.get(String(rec.studentId));
+            if (!student || !student.whatsappNo) continue;
+
+            const studentName = student.name || `${student.firstName || ''} ${student.lastName || ''}`.trim();
+            const existingStudentRec = previousRecord?.records?.find(
+              (r: any) => (r.student || '').toString() === String(rec.studentId)
+            );
+            const nameParams = { student_name_en: studentName, student_name_te: studentName };
+
+            if (isHalfDay) {
+              if (rec.morningStatus === 'absent' && existingStudentRec?.morningStatus !== 'absent') {
+                await queueTemplateNotification('attendance.morning', {
+                  to: student.whatsappNo,
+                  params: nameParams,
+                  dedupeKey: `attendance:${dateStr}:${rec.studentId}:morning`
+                });
+                console.log(`[Attendance WhatsApp Alert] Morning template queued for student ${studentName} to ${student.whatsappNo}`);
+              }
+
+              if (rec.afternoonStatus === 'absent' && existingStudentRec?.afternoonStatus !== 'absent') {
+                await queueTemplateNotification('attendance.afternoon', {
+                  to: student.whatsappNo,
+                  params: nameParams,
+                  dedupeKey: `attendance:${dateStr}:${rec.studentId}:afternoon`
+                });
+                console.log(`[Attendance WhatsApp Alert] Afternoon template queued for student ${studentName} to ${student.whatsappNo}`);
+              }
+            } else {
+              if (rec.status === 'absent' && existingStudentRec?.status !== 'absent') {
+                await queueTemplateNotification('attendance.full', {
+                  to: student.whatsappNo,
+                  params: nameParams,
+                  dedupeKey: `attendance:${dateStr}:${rec.studentId}:full`
+                });
+                console.log(`[Attendance WhatsApp Alert] Full-day template queued for student ${studentName} to ${student.whatsappNo}`);
+              }
+            }
+          }
+        } catch (alertErr) {
+          console.error('[Attendance WhatsApp Alert Background Error]:', alertErr);
+        }
+      })();
+    }
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });
   }

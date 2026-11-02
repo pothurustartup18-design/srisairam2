@@ -4,6 +4,7 @@ import {
   BookOpen, Clock, AlertCircle, Users, X, Calendar
 } from 'lucide-react';
 import type { HomeworkData, ClassData } from '../../../types';
+import { getAccessToken } from '../../../services/api';
 import { API_BASE, formatClassName, formatRoomDisplay, sortClasses } from '../../../constants';
 import { cn } from '../../../lib/utils';
 import { Button, Badge, EmptyState, LoadingSpinner, Drawer } from '../../ui';
@@ -131,22 +132,55 @@ const HomeworkBoard: React.FC<HomeworkBoardProps> = ({
   // shared here — the S3 key layout isn't event-specific) — the file bytes go
   // straight from this browser to S3, never through Node as base64 JSON.
   const uploadHomeworkAttachment = async (file: File): Promise<string> => {
-    const presignRes = await fetch(`${API_BASE}/events/media/presign`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fileName: file.name })
-    });
-    const presignData = await presignRes.json();
-    if (!presignData.success) throw new Error(presignData.message || `Failed to prepare upload for ${file.name}`);
+    const token = getAccessToken();
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    };
 
-    const putRes = await fetch(presignData.uploadUrl, {
-      method: 'PUT',
-      headers: { 'Content-Type': file.type || 'application/octet-stream' },
-      body: file
-    });
-    if (!putRes.ok) throw new Error(`Failed to upload ${file.name}.`);
+    try {
+      const presignRes = await fetch(`${API_BASE}/events/media/presign`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ fileName: file.name })
+      });
+      const presignData = await presignRes.json();
+      if (!presignData.success) throw new Error(presignData.message || 'Presign failed');
 
-    return presignData.previewUrl as string;
+      const putRes = await fetch(presignData.uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type || 'application/octet-stream' },
+        body: file
+      });
+      if (!putRes.ok) throw new Error('Direct upload failed');
+
+      return presignData.previewUrl as string;
+    } catch {
+      // Direct server-side upload fallback (bypasses browser CORS / S3 PUT issues)
+      return new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = async () => {
+          try {
+            const base64Data = reader.result as string;
+            const res = await fetch(`${API_BASE}/events/media/upload-direct`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({ fileName: file.name, fileData: base64Data })
+            });
+            const data = await res.json();
+            if (data.success && data.previewUrl) {
+              resolve(data.previewUrl);
+            } else {
+              reject(new Error(data.message || `Failed to upload ${file.name}`));
+            }
+          } catch (e: any) {
+            reject(e);
+          }
+        };
+        reader.onerror = () => reject(new Error(`Failed to read file ${file.name}`));
+        reader.readAsDataURL(file);
+      });
+    }
   };
 
   const handleFileAttach = (e: React.ChangeEvent<HTMLInputElement>) => {

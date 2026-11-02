@@ -663,32 +663,39 @@ const ExamAnalytics: React.FC<ExamAnalyticsProps> = ({ examsList, students, sele
           </Card>
 
           <Card>
-            <CardHeader title="Exam Summary" />
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
+            <CardHeader title="Exam Summary" subtitle="Performance comparison across terms" />
+            <div className="overflow-x-auto -webkit-overflow-scrolling-touch">
+              <table className="w-full text-sm min-w-[520px] border-collapse">
+                <thead className="bg-slate-50">
                   <tr>
-                    {['Exam', 'Class Avg', 'Pass Rate', 'Highest', 'Lowest', 'Trend'].map(h => (
-                      <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 border-b border-gray-100">{h}</th>
-                    ))}
+                    <th className="sticky left-0 bg-slate-50 z-10 px-4 py-2.5 text-left text-xs font-bold text-slate-700 border-b border-slate-200 shadow-[1px_0_0_0_#e2e8f0]">Exam</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-700 border-b border-slate-200">Class Avg</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-700 border-b border-slate-200">Pass Rate</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-700 border-b border-slate-200">Highest</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-700 border-b border-slate-200">Lowest</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-700 border-b border-slate-200">Trend</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-50">
+                <tbody className="divide-y divide-slate-100">
                   {trendData.map((d, i) => {
                     const prev = i > 0 ? trendData[i - 1] : null;
                     const td = prev ? diff(d.avg, prev.avg) : null;
                     return (
-                      <tr key={d.name} className="hover:bg-gray-50">
-                        <td className="px-4 py-2.5 font-medium text-gray-900">{d.name}</td>
-                        <td className="px-4 py-2.5 font-bold" style={{ color: d.avg >= 60 ? '#16a34a' : d.avg >= 40 ? '#ca8a04' : '#dc2626' }}>{fmt(d.avg)}</td>
-                        <td className="px-4 py-2.5">
-                          <span className={cn('text-xs font-semibold px-1.5 py-0.5 rounded', d.passRate >= 75 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600')}>
+                      <tr key={d.name} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="sticky left-0 bg-white z-10 px-4 py-3 font-bold text-slate-900 border-b border-slate-100 shadow-[1px_0_0_0_#f1f5f9] whitespace-nowrap">
+                          {d.name}
+                        </td>
+                        <td className="px-4 py-3 font-black whitespace-nowrap" style={{ color: d.avg >= 60 ? '#16a34a' : d.avg >= 40 ? '#ca8a04' : '#dc2626' }}>
+                          {fmt(d.avg)}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span className={cn('text-xs font-bold px-2 py-0.5 rounded-md border', d.passRate >= 75 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-600 border-rose-200')}>
                             {fmt(d.passRate)}
                           </span>
                         </td>
-                        <td className="px-4 py-2.5 text-emerald-600 font-medium">{fmt(trendData[i]?.highest ?? null)}</td>
-                        <td className="px-4 py-2.5 text-red-500 font-medium">{fmt(trendData[i]?.lowest ?? null)}</td>
-                        <td className="px-4 py-2.5">{td !== null ? <Delta d={td} /> : <span className="text-xs text-gray-400">First exam</span>}</td>
+                        <td className="px-4 py-3 text-emerald-600 font-extrabold whitespace-nowrap">{fmt(trendData[i]?.highest ?? null)}</td>
+                        <td className="px-4 py-3 text-rose-500 font-bold whitespace-nowrap">{fmt(trendData[i]?.lowest ?? null)}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">{td !== null ? <Delta d={td} /> : <span className="text-xs text-slate-400 font-medium">First exam</span>}</td>
                       </tr>
                     );
                   })}

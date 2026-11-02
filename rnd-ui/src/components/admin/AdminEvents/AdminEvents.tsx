@@ -69,8 +69,16 @@ const AdminEvents: React.FC<AdminEventsProps> = ({
   const [formTab,  setFormTab]  = React.useState<'notice' | 'event'>('notice');
   const [boardTab, setBoardTab] = React.useState<'notices' | 'events'>('notices');
 
-  const noticesList = events.filter(e => e.type ? e.type === 'notice' : (!e.media || e.media.length === 0));
-  const eventsList  = events.filter(e => e.type ? e.type === 'event' : (e.media && e.media.length > 0));
+  const sortedEvents = React.useMemo(() => {
+    return [...events].sort((a, b) => {
+      const timeA = new Date(a.date || a.createdAt || 0).getTime();
+      const timeB = new Date(b.date || b.createdAt || 0).getTime();
+      return timeB - timeA;
+    });
+  }, [events]);
+
+  const noticesList = sortedEvents.filter(e => e.type ? e.type === 'notice' : (!e.media || e.media.length === 0));
+  const eventsList  = sortedEvents.filter(e => e.type ? e.type === 'event' : (e.media && e.media.length > 0));
 
   const getTodayDateString = () => {
     const d = new Date();
@@ -337,7 +345,11 @@ const AdminEvents: React.FC<AdminEventsProps> = ({
                 {ev.media?.map((url, mi) => {
                   const type = getMediaType(url);
                   if (type === 'image')
-                    return <div key={mi} className="h-44 bg-cover bg-center bg-slate-100" style={{ backgroundImage: `url(${url})` }} />;
+                    return (
+                      <div key={mi} className="w-full bg-slate-100 dark:bg-slate-900 flex items-center justify-center border-b border-slate-100 overflow-hidden py-1">
+                        <img src={url} alt={ev.title} className="w-full max-h-72 object-contain rounded-t-lg transition-transform hover:scale-[1.01] duration-200" loading="lazy" />
+                      </div>
+                    );
                   if (type === 'video')
                     return <video key={mi} src={url} controls className="w-full h-40 object-cover bg-black" />;
                   if (type === 'audio')

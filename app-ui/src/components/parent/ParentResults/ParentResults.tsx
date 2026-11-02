@@ -75,10 +75,17 @@ const ParentResults: React.FC<ParentResultsProps> = ({ examResults = [], status 
   const summaryStats = useMemo(() => {
     if (!examResults || examResults.length === 0) return null;
 
-    const totalPcts = examResults.reduce((sum, e) => sum + safeNumber(e.percentage), 0);
-    const avgPct = Math.round(totalPcts / examResults.length);
-    const latest = examResults[examResults.length - 1];
-    const prev = examResults.length > 1 ? examResults[examResults.length - 2] : null;
+    // Chronologically sort assessments so latest and previous are accurate
+    const sorted = [...examResults].sort((a, b) => {
+      const timeA = new Date((a as any).examDate || (a as any).date || (a as any).createdAt || 0).getTime();
+      const timeB = new Date((b as any).examDate || (b as any).date || (b as any).createdAt || 0).getTime();
+      return timeA - timeB;
+    });
+
+    const totalPcts = sorted.reduce((sum, e) => sum + safeNumber(e.percentage), 0);
+    const avgPct = Math.round(totalPcts / sorted.length);
+    const latest = sorted[sorted.length - 1];
+    const prev = sorted.length > 1 ? sorted[sorted.length - 2] : null;
 
     // Resolve latest exam marks
     const latestObtained =
@@ -107,7 +114,7 @@ const ParentResults: React.FC<ParentResultsProps> = ({ examResults = [], status 
 
     // Find best subject across all exams
     let bestSubject = { name: 'Mathematics', pct: 0 };
-    examResults.forEach((e) => {
+    sorted.forEach((e) => {
       e.marks?.forEach((m: any) => {
         const obt = safeNumber(m.obtainedMarks ?? m.marks ?? m.score);
         const subDef = e.subjects?.find((s: any) => s.name?.trim().toLowerCase() === m.subject?.trim().toLowerCase());
@@ -127,8 +134,9 @@ const ParentResults: React.FC<ParentResultsProps> = ({ examResults = [], status 
       latestPossible: safeNumber(latestPossible, 100),
       prev,
       diff,
+      diffLabel: prev ? `vs ${prev.examName || 'Prev'}` : '1st Exam',
       bestSubject,
-      count: examResults.length,
+      count: sorted.length,
     };
   }, [examResults]);
 
@@ -306,7 +314,9 @@ const ParentResults: React.FC<ParentResultsProps> = ({ examResults = [], status 
                     '—'
                   )}
                 </span>
-                <span className="ph-telemetry-lbl">Progress Trend</span>
+                <span className="ph-telemetry-lbl truncate max-w-[110px]" title={summaryStats.diffLabel}>
+                  {summaryStats.diffLabel}
+                </span>
               </div>
 
               <div className="ph-telemetry-divider" />

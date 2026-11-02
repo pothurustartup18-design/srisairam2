@@ -206,6 +206,123 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
   const [generatingStudentId, setGeneratingStudentId] = useState<string | null>(null);
   const [downloadingSingleStudentId, setDownloadingSingleStudentId] = useState<string | null>(null);
   const [sendingWhatsappId, setSendingWhatsappId] = useState<string | null>(null);
+
+  // Batch class report card WhatsApp dispatch state
+  const [showBatchSendModal, setShowBatchSendModal] = useState(false);
+  const [batchSendStep, setBatchSendStep] = useState<'confirm' | 'processing' | 'done'>('confirm');
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, studentName: '', actionText: '' });
+  const [batchLogs, setBatchLogs] = useState<Array<{ id: string; name: string; status: 'pending' | 'generating' | 'sending' | 'sent' | 'skipped_no_whatsapp' | 'error'; message?: string }>>([]);
+  const [batchStats, setBatchStats] = useState({ sent: 0, skippedNoWa: 0, errors: 0 });
+  const batchCancelledRef = useRef(false);
+
+  const handleOpenBatchSendModal = () => {
+    if (!selectedExam) return;
+    if (students.length === 0) {
+      showToast('No students enrolled in this class.', 'error');
+      return;
+    }
+    const marksList = selectedExam.studentMarks || [];
+    if (marksList.length === 0) {
+      showToast('No marks submitted for this exam yet.', 'error');
+      return;
+    }
+    setBatchSendStep('confirm');
+    setBatchProgress({ current: 0, total: students.length, studentName: '', actionText: '' });
+    setBatchLogs(students.map(s => ({
+      id: s.id,
+      name: s.name || `${s.firstName || ''} ${s.lastName || ''}`.trim() || 'Student',
+      status: 'pending',
+    })));
+    setBatchStats({ sent: 0, skippedNoWa: 0, errors: 0 });
+    setShowBatchSendModal(true);
+  };
+
+  const handleStartBatchSend = async () => {
+    if (!selectedExam) return;
+    batchCancelledRef.current = false;
+    setBatchSendStep('processing');
+
+    let sent = 0;
+    let skippedNoWa = 0;
+    let errors = 0;
+
+    for (let i = 0; i < students.length; i++) {
+      if (batchCancelledRef.current) break;
+
+      const student = students[i];
+      const studentName = student.name || `${student.firstName || ''} ${student.lastName || ''}`.trim() || 'Student';
+      const whatsappNo = (student as any).whatsappNo;
+
+      setBatchProgress({
+        current: i + 1,
+        total: students.length,
+        studentName,
+        actionText: 'Checking WhatsApp details...',
+      });
+
+      // 1. Check WhatsApp
+      if (!whatsappNo) {
+        skippedNoWa++;
+        setBatchLogs(prev => prev.map(l => l.id === student.id ? { ...l, status: 'skipped_no_whatsapp', message: 'No WhatsApp number on file' } : l));
+        setBatchStats({ sent, skippedNoWa, errors });
+        continue;
+      }
+
+      try {
+        // 2. Check if PDF exists in selectedExam
+        const smRecord = (selectedExam.studentMarks || []).find((m: any) => String(m.student) === String(student.id));
+        let pdfUrl = smRecord?.pdfUrl;
+
+        if (!pdfUrl) {
+          setBatchProgress({
+            current: i + 1,
+            total: students.length,
+            studentName,
+            actionText: 'Generating & uploading report card PDF...',
+          });
+          setBatchLogs(prev => prev.map(l => l.id === student.id ? { ...l, status: 'generating' } : l));
+          pdfUrl = await uploadSingleStudentReportPDF(selectedExam, student, studentRemarks, teacherName);
+        }
+
+        // 3. Dispatch WhatsApp alert
+        setBatchProgress({
+          current: i + 1,
+          total: students.length,
+          studentName,
+          actionText: 'Dispatching WhatsApp document message...',
+        });
+        setBatchLogs(prev => prev.map(l => l.id === student.id ? { ...l, status: 'sending' } : l));
+
+        const token = getAccessToken();
+        const headers: HeadersInit = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+        const res = await fetch(`${API_BASE}/marks/${selectedExam._id}/report-card/${student.id}/whatsapp`, {
+          method: 'POST',
+          headers,
+        });
+        const resData = await res.json();
+
+        if (res.ok && resData.success) {
+          sent++;
+          setBatchLogs(prev => prev.map(l => l.id === student.id ? { ...l, status: 'sent', message: 'Report card sent to parent' } : l));
+        } else {
+          errors++;
+          setBatchLogs(prev => prev.map(l => l.id === student.id ? { ...l, status: 'error', message: resData.message || 'Failed to queue message' } : l));
+        }
+      } catch (err: any) {
+        errors++;
+        setBatchLogs(prev => prev.map(l => l.id === student.id ? { ...l, status: 'error', message: err.message || 'Error processing report card' } : l));
+      }
+
+      setBatchStats({ sent, skippedNoWa, errors });
+      await new Promise(r => setTimeout(r, 200));
+    }
+
+    setBatchSendStep('done');
+    if (onLoadExamDetails) onLoadExamDetails(selectedExam._id);
+    showToast(`Batch dispatch finished: ${sent} report cards sent.`, sent > 0 ? 'success' : 'error');
+  };
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewStudentName, setPreviewStudentName] = useState<string>('');
   const [downloadingClassPdf, setDownloadingClassPdf] = useState(false);
@@ -608,6 +725,14 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
                   )}
                   <Button variant="secondary" onClick={handleDownloadPDF} loading={downloadingClassPdf}>
                     <FileDown size={14} /> Download Class Reports PDF
+                  </Button>
+                  <Button
+                    variant="success"
+                    onClick={handleOpenBatchSendModal}
+                    disabled={!selectedExam.studentMarks?.length}
+                    className="flex items-center gap-1.5 font-bold shadow-2xs"
+                  >
+                    <MessageCircle size={14} /> Send Class Report Cards (WhatsApp)
                   </Button>
                   {selectedExam.status !== 'locked' && (
                     <Button variant="success" disabled={isLocked} title={isLocked ? 'Mark entry is locked for this class' : ''} onClick={handleSaveRemarks}>
@@ -1136,7 +1261,199 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
         </form>
       )}
 
-      {/* ── Edit Confirmation Modal ────────────────────────────────────────────── */}
+      
+      {/* ── Batch Send Report Cards Modal ── */}
+      <Modal
+        isOpen={showBatchSendModal}
+        onClose={() => {
+          if (batchSendStep === 'processing') {
+            batchCancelledRef.current = true;
+          }
+          setShowBatchSendModal(false);
+        }}
+        title="Broadcast Class Report Cards via WhatsApp"
+        maxWidth="540px"
+        footer={
+          batchSendStep === 'confirm' ? (
+            <div className="flex items-center justify-end gap-2 w-full">
+              <Button variant="secondary" onClick={() => setShowBatchSendModal(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="success"
+                onClick={handleStartBatchSend}
+                className="flex items-center gap-2 font-bold"
+              >
+                <MessageCircle size={14} /> Start Sending to Parents
+              </Button>
+            </div>
+          ) : batchSendStep === 'processing' ? (
+            <div className="flex items-center justify-between w-full">
+              <span className="text-xs text-slate-500 font-medium animate-pulse">
+                Sending in progress... Please keep this window open.
+              </span>
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => {
+                  batchCancelledRef.current = true;
+                }}
+              >
+                Stop Sending
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-end w-full">
+              <Button variant="primary" onClick={() => setShowBatchSendModal(false)}>
+                Done
+              </Button>
+            </div>
+          )
+        }
+      >
+        {selectedExam && (
+          <div className="flex flex-col gap-4 py-1 text-slate-800 dark:text-slate-100 font-sans">
+            {batchSendStep === 'confirm' && (
+              <>
+                <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-xl flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <MessageCircle size={18} />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-emerald-950 dark:text-emerald-100 m-0">
+                      Send to All Students in Class {selectedExam.class}
+                    </h4>
+                    <p className="text-xs text-emerald-800/90 dark:text-emerald-300/90 m-0 mt-0.5 leading-relaxed">
+                      This will automatically generate any pending report card PDFs and send each parent their child's individual marksheet directly to their registered WhatsApp number.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2.5">
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 text-center">
+                    <div className="text-lg font-extrabold text-slate-900 dark:text-white">
+                      {students.length}
+                    </div>
+                    <div className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500 mt-0.5">
+                      Total Students
+                    </div>
+                  </div>
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 text-center">
+                    <div className="text-lg font-extrabold text-emerald-600 dark:text-emerald-400">
+                      {students.filter(s => !!(s as any).whatsappNo).length}
+                    </div>
+                    <div className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500 mt-0.5">
+                      Has WhatsApp
+                    </div>
+                  </div>
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 text-center">
+                    <div className="text-lg font-extrabold text-blue-600 dark:text-blue-400">
+                      {students.filter(s => {
+                        const sm = (selectedExam.studentMarks || []).find((m: any) => String(m.student) === String(s.id));
+                        return !!sm?.pdfUrl;
+                      }).length}
+                    </div>
+                    <div className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500 mt-0.5">
+                      PDFs Ready
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-xs text-slate-500 leading-relaxed">
+                  <strong>Exam Term:</strong> {selectedExam.examName} ({selectedExam.subjects.length} subjects)
+                  <br />
+                  <strong>Message:</strong> Official verified <code>report_card_notice</code> document template with PDF attachment.
+                </div>
+              </>
+            )}
+
+            {(batchSendStep === 'processing' || batchSendStep === 'done') && (
+              <>
+                {/* Progress Bar */}
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between text-xs font-bold">
+                    <span className="text-slate-700 dark:text-slate-200">
+                      {batchSendStep === 'done' ? '✓ Process Complete' : batchProgress.actionText}
+                    </span>
+                    <span className="text-blue-600 dark:text-blue-400">
+                      {batchProgress.current} / {batchProgress.total}
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-2 overflow-hidden">
+                    <div
+                      className={cn(
+                        'h-2 rounded-full transition-all duration-300',
+                        batchSendStep === 'done' ? 'bg-emerald-500' : 'bg-blue-600'
+                      )}
+                      style={{
+                        width: `${batchProgress.total > 0 ? (batchProgress.current / batchProgress.total) * 100 : 0}%`,
+                      }}
+                    />
+                  </div>
+                  {batchSendStep === 'processing' && batchProgress.studentName && (
+                    <span className="text-[11px] text-slate-500 font-medium">
+                      Current student: <strong className="text-slate-800 dark:text-slate-200">{batchProgress.studentName}</strong>
+                    </span>
+                  )}
+                </div>
+
+                {/* Real-time stats pill strip */}
+                <div className="flex items-center gap-2 pt-1 text-xs">
+                  <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 font-bold">
+                    ✓ Sent: {batchStats.sent}
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-400 border border-amber-200 dark:border-amber-800 font-bold">
+                    ⚠️ Skipped (No WA): {batchStats.skippedNoWa}
+                  </span>
+                  {batchStats.errors > 0 && (
+                    <span className="px-2.5 py-1 rounded-lg bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400 border border-rose-200 dark:border-rose-800 font-bold">
+                      ❌ Errors: {batchStats.errors}
+                    </span>
+                  )}
+                </div>
+
+                {/* Student Queue / Logs List */}
+                <div className="max-h-[220px] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-1 bg-slate-50/50 dark:bg-slate-900/40">
+                  {batchLogs.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between gap-2 px-3 py-2 text-xs">
+                      <span className="font-semibold text-slate-800 dark:text-slate-200 truncate">
+                        {item.name}
+                      </span>
+                      <div className="shrink-0">
+                        {item.status === 'sent' && (
+                          <span className="inline-flex items-center gap-1 font-bold text-emerald-600 dark:text-emerald-400 text-[11px]">
+                            <CheckCircle size={12} /> Sent
+                          </span>
+                        )}
+                        {(item.status === 'generating' || item.status === 'sending') && (
+                          <span className="inline-flex items-center gap-1 font-bold text-blue-600 dark:text-blue-400 text-[11px]">
+                            <Loader2 size={12} className="animate-spin" /> {item.status === 'generating' ? 'Generating PDF' : 'Sending WA'}
+                          </span>
+                        )}
+                        {item.status === 'skipped_no_whatsapp' && (
+                          <span className="inline-flex items-center gap-1 font-semibold text-amber-700 dark:text-amber-400 text-[11px]">
+                            <AlertTriangle size={12} /> No WhatsApp
+                          </span>
+                        )}
+                        {item.status === 'error' && (
+                          <span className="inline-flex items-center gap-1 font-semibold text-rose-600 dark:text-rose-400 text-[11px]" title={item.message}>
+                            ❌ Failed
+                          </span>
+                        )}
+                        {item.status === 'pending' && (
+                          <span className="text-slate-400 text-[11px]">Pending</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </Modal>
+
+{/* ── Edit Confirmation Modal ────────────────────────────────────────────── */}
       <Modal
         isOpen={showEditConfirm}
         onClose={() => { setShowEditConfirm(false); setPendingEditExam(null); }}

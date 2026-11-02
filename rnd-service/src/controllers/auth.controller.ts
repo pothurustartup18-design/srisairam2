@@ -134,9 +134,12 @@ export const login = (req: Request, res: Response, next: NextFunction) => {
       let studentName = undefined;
       let admissionNo = undefined;
 
+      let teacherDoc: any = null;
+
       if (user.role === 'teacher') {
         const teacher = await Teacher.findOne({ userId: user._id });
         if (teacher) {
+          teacherDoc = teacher;
           responseId = teacher._id;
           assignedClass = teacher.assignedClass;
           classTeacherOf = teacher.classTeacherOf;
@@ -162,7 +165,7 @@ export const login = (req: Request, res: Response, next: NextFunction) => {
           id: responseId,
           role: user.role,
           name: `${user.firstName} ${user.lastName}`.trim(),
-          username: user.username,
+          username: user.role === 'teacher' && teacherDoc ? teacherDoc.employeeId : (user.role === 'parent' && admissionNo ? admissionNo : user.username),
           email: user.email,
           phone: user.phone,
           avatar: user.avatar,
@@ -346,6 +349,8 @@ export const me = async (req: Request, res: Response) => {
       userObj._id = teacher._id; // Map User ID to Teacher ID for frontend Context user
       userObj.assignedClass = teacher.assignedClass;
       userObj.classTeacherOf = teacher.classTeacherOf;
+      userObj.employeeId = teacher.employeeId;
+      userObj.username = teacher.employeeId;
     }
   } else if (user.role === 'parent') {
     const student = await Student.findById(user.studentId);

@@ -1125,3 +1125,315 @@
     display: flex;
   }
 }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   DARK MODE STYLES (.dark / html.dark)
+   ═══════════════════════════════════════════════════════════════════════════════ */
+.dark .am-layout,
+html.dark .am-layout {
+  background: #0f172a;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+.dark .am-sidebar,
+html.dark .am-sidebar {
+  background: #0f172a;
+  border-right-color: #1e293b;
+}
+
+.dark .am-sidebar-header,
+html.dark .am-sidebar-header {
+  background: #0f172a;
+  border-bottom-color: #1e293b;
+}
+
+.dark .am-sidebar-title,
+html.dark .am-sidebar-title {
+  color: #f1f5f9;
+}
+
+.dark .am-new-chat-btn,
+html.dark .am-new-chat-btn {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+}
+.dark .am-new-chat-btn:hover,
+html.dark .am-new-chat-btn:hover {
+  background: #2563eb;
+  color: #fff;
+}
+
+.dark .am-search-bar,
+html.dark .am-search-bar {
+  background: #1e293b;
+}
+
+.dark .am-search-input,
+html.dark .am-search-input {
+  color: #f1f5f9;
+}
+
+.dark .am-search-input::placeholder,
+html.dark .am-search-input::placeholder {
+  color: #64748b;
+}
+
+.dark .am-search-icon,
+html.dark .am-search-icon,
+.dark .am-search-clear,
+html.dark .am-search-clear {
+  color: #64748b;
+}
+
+.dark .am-tabs,
+html.dark .am-tabs {
+  border-top-color: #1e293b;
+}
+
+.dark .am-tab,
+html.dark .am-tab {
+  color: #94a3b8;
+}
+
+.dark .am-tab:hover:not(.active),
+html.dark .am-tab:hover:not(.active) {
+  background: rgba(59, 130, 246, 0.1);
+  color: #60a5fa;
+}
+
+.dark .am-tab.active,
+html.dark .am-tab.active {
+  color: #60a5fa;
+  border-bottom-color: #60a5fa;
+}
+
+.dark .am-threads-list::-webkit-scrollbar-thumb,
+html.dark .am-threads-list::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+
+.dark .am-thread-item,
+html.dark .am-thread-item {
+  border-bottom-color: #1e293b;
+}
+
+.dark .am-thread-item:hover,
+html.dark .am-thread-item:hover {
+  background: #1e293b;
+}
+
+.dark .am-thread-item.active,
+html.dark .am-thread-item.active {
+  background: rgba(59, 130, 246, 0.18);
+}
+
+.dark .am-thread-item.active::before,
+html.dark .am-thread-item.active::before {
+  background: #3b82f6;
+}
+
+.dark .am-thread-name,
+html.dark .am-thread-name {
+  color: #f1f5f9;
+}
+
+.dark .am-thread-preview,
+html.dark .am-thread-preview {
+  color: #94a3b8;
+}
+
+.dark .am-preview-bold,
+html.dark .am-preview-bold {
+  color: #cbd5e1;
+}
+
+.dark .am-thread-time,
+html.dark .am-thread-time {
+  color: #64748b;
+}
+
+.dark .am-online-dot,
+html.dark .am-online-dot {
+  border-color: #0f172a;
+}
+
+.dark .am-chat-pane,
+html.dark .am-chat-pane {
+  background: #090d16;
+}
+
+.dark .am-chat-header,
+html.dark .am-chat-header {
+  background: #0f172a;
+  border-bottom-color: #1e293b;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.dark .am-chat-header-name,
+html.dark .am-chat-header-name {
+  color: #f1f5f9;
+}
+
+.dark .am-chat-header-status,
+html.dark .am-chat-header-status {
+  color: #64748b;
+}
+
+.dark .am-hdr-btn,
+html.dark .am-hdr-btn {
+  color: #94a3b8;
+}
+
+.dark .am-hdr-btn:hover,
+html.dark .am-hdr-btn:hover {
+  background: #1e293b;
+  color: #60a5fa;
+}
+
+.dark .am-hdr-dropdown,
+html.dark .am-hdr-dropdown {
+  background: #1e293b;
+  border-color: #334155;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+.dark .am-hdr-dropdown button,
+html.dark .am-hdr-dropdown button {
+  color: #e2e8f0;
+}
+
+.dark .am-hdr-dropdown button:hover,
+html.dark .am-hdr-dropdown button:hover {
+  background: #334155;
+}
+
+.dark .am-dropdown-divider,
+html.dark .am-dropdown-divider {
+  border-top-color: #334155;
+}
+
+.dark .am-chat-body,
+html.dark .am-chat-body {
+  background: #090d16;
+}
+
+.dark .am-chat-body::-webkit-scrollbar-thumb,
+html.dark .am-chat-body::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+
+.dark .am-date-pill,
+html.dark .am-date-pill {
+  background: #1e293b;
+  color: #94a3b8;
+  border: 1px solid #334155;
+}
+
+.dark .am-bubble-other,
+html.dark .am-bubble-other {
+  background: #1e293b;
+  color: #f1f5f9;
+  border-color: #334155;
+}
+
+.dark .am-bubble-other .am-bubble-sender,
+html.dark .am-bubble-other .am-bubble-sender {
+  color: #93c5fd;
+}
+
+.dark .am-bubble-other .am-bubble-time,
+html.dark .am-bubble-other .am-bubble-time {
+  color: #64748b;
+}
+
+.dark .am-bubble-me,
+html.dark .am-bubble-me {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.dark .am-chat-footer,
+html.dark .am-chat-footer {
+  background: #0f172a;
+  border-top-color: #1e293b;
+}
+
+.dark .am-footer-input,
+html.dark .am-footer-input {
+  background: #1e293b;
+  color: #f1f5f9;
+  border-color: #334155;
+}
+
+.dark .am-footer-input:focus,
+html.dark .am-footer-input:focus {
+  background: #1e293b;
+  border-color: #3b82f6;
+}
+
+.dark .am-footer-input::placeholder,
+html.dark .am-footer-input::placeholder {
+  color: #64748b;
+}
+
+.dark .am-footer-icon-btn,
+html.dark .am-footer-icon-btn {
+  color: #94a3b8;
+}
+
+.dark .am-footer-icon-btn:hover,
+html.dark .am-footer-icon-btn:hover,
+.dark .am-footer-icon-btn.active,
+html.dark .am-footer-icon-btn.active {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+}
+
+.dark .am-emoji-picker,
+html.dark .am-emoji-picker {
+  background: #1e293b;
+  border-color: #334155;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+}
+
+.dark .am-emoji-btn:hover,
+html.dark .am-emoji-btn:hover {
+  background: #334155;
+}
+
+.dark .am-typing-bubble,
+html.dark .am-typing-bubble {
+  background: #1e293b;
+  border-color: #334155;
+}
+
+.dark .am-reaction-badge,
+html.dark .am-reaction-badge {
+  background: #1e293b;
+  border-color: #334155;
+  color: #f1f5f9;
+}
+
+.dark .am-reaction-btn,
+html.dark .am-reaction-btn {
+  background: #1e293b;
+  border-color: #334155;
+}
+
+.dark .am-back-btn,
+html.dark .am-back-btn {
+  color: #94a3b8;
+}
+
+.dark .am-back-btn:hover,
+html.dark .am-back-btn:hover {
+  background: #1e293b;
+}
+
+@media (max-width: 767px) {
+  .dark .am-chat-pane:not(.am-chat-pane--hidden-mobile),
+  html.dark .am-chat-pane:not(.am-chat-pane--hidden-mobile) {
+    background: #090d16;
+  }
+}

@@ -15,29 +15,30 @@ passport.use(
     },
     async (username, password, done) => {
       try {
-        const lowerUsername = username.trim().toLowerCase();
+        const trimmed = username.trim();
+        const lowerUsername = trimmed.toLowerCase();
+        const upperUsername = trimmed.toUpperCase();
 
-        // --- MongoDB Database Connection Active ---
-        // Query User by username, email, employeeId, or phone
+        // Query User by username, employeeId, email, or phone
         let user: IUser | null = await User.findOne({
           $or: [
             { username: lowerUsername },
+            { username: upperUsername },
+            { employeeId: upperUsername },
+            { employeeId: lowerUsername },
             { email: lowerUsername },
-            { employeeId: lowerUsername.toUpperCase() },
-            { phone: username.trim() } // phone login for employees
+            { phone: trimmed }
           ]
         }).select('+password') as IUser | null;
         
-        // Backward-compatible fallback: search by Teacher model employeeId
+        // Backward-compatible fallback: search by Teacher model employeeId or phone
         if (!user) {
-          const teacher = await Teacher.findOne({ employeeId: { $regex: new RegExp(`^${lowerUsername}$`, 'i') } });
-          if (teacher && teacher.userId) {
-            user = await User.findById(teacher.userId).select('+password') as IUser | null;
-          }
-        }
-        // Also try phone on Teacher model
-        if (!user) {
-          const teacher = await Teacher.findOne({ phone: username.trim() });
+          const teacher = await Teacher.findOne({
+            $or: [
+              { employeeId: { $regex: new RegExp(`^${trimmed}$`, 'i') } },
+              { phone: trimmed }
+            ]
+          });
           if (teacher && teacher.userId) {
             user = await User.findById(teacher.userId).select('+password') as IUser | null;
           }

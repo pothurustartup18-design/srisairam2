@@ -101,17 +101,17 @@ const ParentFeedback: React.FC<ParentFeedbackProps> = ({ ward, feedbackList, loa
           <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-slate-100 bg-slate-50/60">
             <MessageSquare size={15} className="text-blue-600" />
             <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-              Submit New Concern or Query
+              Ask a Question to School Office
             </span>
           </div>
 
           <form onSubmit={handleSubmitFeedback} className="p-5 flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
-              <label className={labelCls}>Subject / Category</label>
-              <input
-                type="text"
-                className={inputCls}
-                placeholder="e.g. Transport timing, Homework difficulty, Fee query..."
+              <label className={labelCls}>What is your question about?</label>
+                <input
+                  type="text"
+                  className={inputCls}
+                  placeholder="e.g. Bus transport route, Homework, Fee receipt, Leave..."
                 required
                 value={feedbackSubject}
                 onChange={(e) => setFeedbackSubject(e.target.value)}
@@ -120,9 +120,9 @@ const ParentFeedback: React.FC<ParentFeedbackProps> = ({ ward, feedbackList, loa
 
             <div className="flex flex-col gap-1.5">
               <label className={labelCls}>Your Message</label>
-              <textarea
-                className="min-h-[120px] px-3.5 py-2.5 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 bg-slate-50/50 outline-none focus:border-blue-600 focus:bg-white transition-all font-[inherit] resize-y"
-                placeholder="Please describe your query or concern in detail…"
+                <textarea
+                  className="min-h-[110px] px-3.5 py-2.5 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 bg-slate-50/50 outline-none focus:border-blue-600 focus:bg-white transition-all font-[inherit] resize-y"
+                  placeholder="Write your question or request clearly so school administration can reply..."
                 required
                 value={feedbackMessage}
                 onChange={(e) => setFeedbackMessage(e.target.value)}
@@ -154,7 +154,7 @@ const ParentFeedback: React.FC<ParentFeedbackProps> = ({ ward, feedbackList, loa
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between pb-1">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-              Submitted Communication Threads ({feedbackList.length})
+              My Questions & School Replies ({feedbackList.length})
             </span>
           </div>
 

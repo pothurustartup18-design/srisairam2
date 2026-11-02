@@ -543,16 +543,24 @@ const AdminAttendance: React.FC<AdminAttendanceProps> = ({
       return { studentId: sId, status, morningStatus, afternoonStatus };
     });
     try {
+      const token = getAccessToken();
+      const headers: HeadersInit = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const res = await fetch(`${API_BASE}/attendance`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ date: attendanceDate, classTeacherId: assignedTeacher._id, class: roomName, records, sendAlerts: true }),
       });
       const data = await res.json();
       if (data.success) {
-        const absentees = classStudents.filter(s => attendanceMap[s.id] === 'absent');
+        const absentees = classStudents.filter(s => 
+          attendanceMode === 'half-day' 
+            ? (morningMap[s.id] === 'absent' || afternoonMap[s.id] === 'absent')
+            : attendanceMap[s.id] === 'absent'
+        );
         showToast(absentees.length > 0
-          ? `Register saved. Sent alerts for ${absentees.length} absent students.`
+          ? `Register saved! Sent WhatsApp alerts for ${absentees.length} absent student(s).`
           : 'Class attendance register saved successfully.');
         setIsAlreadyMarked(true);
       } else { showToast(data.message || 'Failed to save.', 'error'); }
@@ -1515,7 +1523,7 @@ const AdminAttendance: React.FC<AdminAttendanceProps> = ({
                       {total} total
                     </div>
                     <Button type="submit" loading={saving} className="min-w-[200px]">
-                      <CheckCircle2 size={16} /> Save Attendance Register
+                      <CheckCircle2 size={16} /> {isAlreadyMarked ? 'Update Attendance Register' : 'Save Attendance Register'}
                     </Button>
                   </div>
                 ) : isPastDate ? (
@@ -1670,7 +1678,7 @@ const AdminAttendance: React.FC<AdminAttendanceProps> = ({
                   {total} total
                 </div>
                 <Button type="submit" loading={saving} className="w-full justify-center">
-                  <CheckCircle2 size={16} /> Save Attendance Register
+                  <CheckCircle2 size={16} /> {isAlreadyMarked ? 'Update Attendance Register' : 'Save Attendance Register'}
                 </Button>
               </div>
             )}

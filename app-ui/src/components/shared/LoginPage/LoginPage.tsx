@@ -71,10 +71,12 @@ const LoginPage: React.FC<LoginPageProps> = ({ toast, onShowToast, onForgotPassw
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!loginUsername || !loginPassword) {
-      onShowToast('Please fill out all credentials.', 'error'); return;
+    if (!loginUsername.trim() || !loginPassword.trim()) {
+      onShowToast('Please fill out all credentials.', 'error');
+      setIsLoggingIn(false);
+      return;
     }
-    await signIn(loginRole, loginUsername, loginPassword, rememberPassword);
+    await signIn(loginRole, loginUsername.trim(), loginPassword.trim(), rememberPassword);
   };
 
   const handlePickSaved = async (saved: SavedLogin) => {
@@ -124,6 +126,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ toast, onShowToast, onForgotPassw
                 setLoginRole(role);
                 setLoginUsername('');
                 setLoginPassword('');
+                setIsLoggingIn(false);
               }}
             >
               <span>{role === 'admin' ? 'Admin' : role === 'teacher' ? 'Teacher' : 'Parent'}</span>
@@ -143,7 +146,10 @@ const LoginPage: React.FC<LoginPageProps> = ({ toast, onShowToast, onForgotPassw
             spellCheck={false}
             required
             value={loginUsername}
-            onChange={(e) => setLoginUsername(e.target.value)}
+            onChange={(e) => {
+              setLoginUsername(e.target.value);
+              if (isLoggingIn) setIsLoggingIn(false);
+            }}
           />
         </Field>
 
@@ -162,7 +168,10 @@ const LoginPage: React.FC<LoginPageProps> = ({ toast, onShowToast, onForgotPassw
               autoComplete="current-password"
               required
               value={loginPassword}
-              onChange={(e) => setLoginPassword(e.target.value)}
+              onChange={(e) => {
+              setLoginPassword(e.target.value);
+              if (isLoggingIn) setIsLoggingIn(false);
+            }}
             />
             <button
               type="button"
@@ -206,8 +215,14 @@ const LoginPage: React.FC<LoginPageProps> = ({ toast, onShowToast, onForgotPassw
           </button>
         )}
 
-        <Button type="submit" size="lg" className="w-full mt-1" loading={isLoggingIn}>
-          {isLoggingIn ? 'Signing in…' : (<><Lock size={16} aria-hidden="true" /> {roleCopy.cta}</>)}
+        <Button
+          type="submit"
+          size="lg"
+          className="w-full mt-1"
+          loading={isLoggingIn}
+          loadingText="Signing in…"
+        >
+          <Lock size={16} aria-hidden="true" /> {roleCopy.cta}
         </Button>
       </Form>
 

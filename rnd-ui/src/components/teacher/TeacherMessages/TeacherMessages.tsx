@@ -371,9 +371,9 @@ const TeacherMessages: React.FC<TeacherMessagesProps> = ({ teacherId, teacherNam
           'w-full md:w-80 md:min-w-[260px] bg-white border-r border-slate-200 flex-col overflow-hidden',
           activeThread ? 'hidden md:flex' : 'flex'
         )}>
-          <div className="bg-white border-b border-slate-200">
+          <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between px-5 pt-4 pb-2.5">
-              <h3 className="m-0 text-lg font-extrabold text-slate-900 flex items-center gap-2">
+              <h3 className="m-0 text-lg font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
                 Class Chat
                 {totalUnread > 0 && (
                   <span className="bg-blue text-white text-2xs font-bold rounded-full min-w-[20px] h-5 flex items-center justify-center px-1.5">{totalUnread}</span>
@@ -388,12 +388,12 @@ const TeacherMessages: React.FC<TeacherMessagesProps> = ({ teacherId, teacherNam
               </button>
             </div>
 
-            <div className="flex items-center mx-3.5 mb-2.5 bg-slate-100 rounded-lg px-3 gap-2">
+            <div className="flex items-center mx-3.5 mb-2.5 bg-slate-100 dark:bg-slate-800 rounded-lg px-3 gap-2">
               <Search size={14} className="text-slate-400 flex-shrink-0" />
               <input
                 type="text"
                 placeholder="Search conversations..."
-                className="flex-1 border-none bg-transparent outline-none text-sm py-2 text-slate-900"
+                className="flex-1 border-none bg-transparent outline-none text-sm py-2 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500"
                 value={searchSidebar}
                 onChange={e => setSearchSidebar(e.target.value)}
               />
@@ -402,11 +402,11 @@ const TeacherMessages: React.FC<TeacherMessagesProps> = ({ teacherId, teacherNam
               )}
             </div>
 
-            <div className="flex border-t border-slate-100">
+            <div className="flex border-t border-slate-100 dark:border-slate-800">
               <button
                 className={cn(
                   'flex-1 flex items-center justify-center gap-1.5 py-2.5 px-2 text-xs font-semibold border-b-2 transition-colors',
-                  activeTab === 'admin' ? 'text-blue border-blue' : 'text-slate-500 border-transparent hover:bg-blue-lt hover:text-blue'
+                  activeTab === 'admin' ? 'text-blue border-blue' : 'text-slate-500 dark:text-slate-400 border-transparent hover:bg-blue-lt dark:hover:bg-slate-800 hover:text-blue'
                 )}
                 onClick={() => setActiveTab('admin')}
               >
@@ -436,15 +436,15 @@ const TeacherMessages: React.FC<TeacherMessagesProps> = ({ teacherId, teacherNam
             {activeTab === 'admin' ? (
               <div
                 className={cn(
-                  'relative flex items-center gap-3 px-4 py-3 cursor-pointer border-b border-slate-100 transition-colors',
-                  activeThread?.type === 'admin' ? 'bg-blue-lt before:content-[""] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[3px] before:bg-blue' : 'hover:bg-slate-50'
+                  'relative flex items-center gap-3 px-4 py-3 cursor-pointer border-b border-slate-100 dark:border-slate-800/80 transition-colors',
+                  activeThread?.type === 'admin' ? 'bg-blue-lt before:content-[""] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[3px] before:bg-blue' : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
                 )}
                 onClick={() => setActiveThread({ type: 'admin', id: 'admin' })}
               >
                 <Avatar name="AD" color="#2563eb" online />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-0.5">
-                    <span className={cn('text-sm text-slate-900 truncate', adminUnreadCount ? 'font-extrabold' : 'font-semibold')}>School Administration</span>
+                    <span className={cn('text-sm text-slate-900 dark:text-slate-100 truncate', adminUnreadCount ? 'font-extrabold' : 'font-semibold')}>School Administration</span>
                     <span className={cn('text-2xs', adminUnreadCount ? 'text-blue font-bold' : 'text-slate-400')}>
                       {formatTimestamp(adminLastMsg.updatedAt)}
                     </span>
@@ -571,7 +571,7 @@ const TeacherMessages: React.FC<TeacherMessagesProps> = ({ teacherId, teacherNam
                             <div className={cn('flex flex-col max-w-[85%] sm:max-w-[70%] min-w-[60px] relative', isMe ? 'items-end' : 'items-start')}>
                               <div className={cn(
                                 'px-3 pt-2 pb-1.5 rounded-xl shadow-sm relative break-words',
-                                isMe ? 'bg-blue text-white rounded-br-[3px]' : 'bg-white text-slate-800 border border-slate-200 rounded-bl-[3px]'
+                                isMe ? 'bg-blue text-white rounded-br-[3px]' : 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-bl-[3px]'
                               )}>
                                 {!isMe && <span className="block text-2xs font-bold mb-0.5 text-blue">{msg.senderName}</span>}
                                 <p className="m-0 mb-1 text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>

@@ -1,4 +1,4 @@
-import { createContext, forwardRef, useEffect, useRef, useState, type FormHTMLAttributes } from 'react';
+import { createContext, forwardRef, useRef, useState, type FormHTMLAttributes } from 'react';
 
 /** True while the enclosing <Form>'s async submit handler is running. */
 export const FormPendingContext = createContext(false);
@@ -14,8 +14,6 @@ export const Form = forwardRef<HTMLFormElement, FormHTMLAttributes<HTMLFormEleme
   function Form({ onSubmit, children, ...props }, ref) {
     const [pending, setPending] = useState(false);
     const pendingRef = useRef(false);
-    const mounted = useRef(true);
-    useEffect(() => () => { mounted.current = false; }, []);
 
     const handleSubmit: NonNullable<FormHTMLAttributes<HTMLFormElement>['onSubmit']> = (e) => {
       if (pendingRef.current) { e.preventDefault(); return; }
@@ -25,9 +23,9 @@ export const Form = forwardRef<HTMLFormElement, FormHTMLAttributes<HTMLFormEleme
         setPending(true);
         const done = () => {
           pendingRef.current = false;
-          if (mounted.current) setPending(false);
+          setPending(false);
         };
-        (result as Promise<unknown>).then(done, done);
+        (result as Promise<unknown>).then(done, done).catch(done);
       }
     };
 

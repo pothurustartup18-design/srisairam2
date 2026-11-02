@@ -1,160 +1,402 @@
-import React, { useState } from 'react';
-import {
-  Image as ImageIcon, Film, Music, FileText, Megaphone, Calendar, Bell
-} from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Calendar, Search, X, Megaphone, CalendarDays, ArrowUpDown, RefreshCw, ChevronDown } from 'lucide-react';
 import type { EventData } from '../../../types';
+import { PageHeader, EmptyState } from '../../ui';
 import { cn } from '../../../lib/utils';
-import { EmptyState } from '../../ui';
+import { API_BASE } from '../../../constants';
+import { getAccessToken } from '../../../services/api';
 
 interface ParentNoticesProps {
-  events: EventData[];
+  events?: EventData[];
 }
 
-const getMediaType = (url: string): 'image' | 'video' | 'audio' | 'document' => {
-  const l = url.toLowerCase();
-  if (/\.(png|jpg|jpeg|webp|gif)/.test(l)) return 'image';
-  if (/\.(mp3|m4a|ogg|wav|aac)/.test(l)) return 'audio';
-  if (/\.(mp4|mov|avi|3gp)/.test(l)) return 'video';
-  return 'document';
+const PAGE_SIZE = 6;
+
+const resolveMediaUrl = (url: string): string => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+    return url;
+  }
+  const cleanPath = url.startsWith('/') ? url : `/${url}`;
+  return `${API_BASE}${cleanPath}`;
 };
 
-const ParentNotices: React.FC<ParentNoticesProps> = ({ events }) => {
-  const [boardTab, setBoardTab] = useState<'notices' | 'events'>('notices');
+const ParentNotices: React.FC<ParentNoticesProps> = ({ events: initialEvents = [] }) => {
+  const [events, setEvents] = useState<EventData[]>(initialEvents || []);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedType, setSelectedType] = useState<'all' | 'notice' | 'event'>('all');
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest'>('newest');
+  const [selectedEvent, setSelectedEvent] = useState<EventData | null>(null);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const parentVisibleEvents = events.filter(e => e.sendAlertsTo !== 'teachers');
-  const noticesList = parentVisibleEvents.filter(e => e.type ? e.type === 'notice' : (!e.media || e.media.length === 0));
-  const eventsList = parentVisibleEvents.filter(e => e.type ? e.type === 'event' : (e.media && e.media.length > 0));
+  // Sync with prop updates
+  useEffect(() => {
+    if (initialEvents && initialEvents.length > 0) {
+      setEvents(initialEvents);
+    }
+  }, [initialEvents]);
 
-  const tabs = [
-    { key: 'notices' as const, label: 'General Notices', count: noticesList.length, Icon: Megaphone },
-    { key: 'events' as const, label: 'Scheduled Events', count: eventsList.length, Icon: Calendar },
-  ];
+  // Fetch freshest notices on mount to stay in sync with admin deletions/additions
+  const fetchNotices = async () => {
+    setRefreshing(true);
+    try {
+      const token = getAccessToken();
+      const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await fetch(`${API_BASE}/events?t=${Date.now()}`, { headers });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.data)) {
+        setEvents(data.data);
+      }
+    } catch (err) {
+      console.error('Failed to refresh notices:', err);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchNotices();
+  }, []);
+
+  // Filter out notices meant only for teachers
+  const parentVisibleEvents = useMemo(() => {
+    return (events || []).filter(e => e.sendAlertsTo !== 'teachers');
+  }, [events]);
+
+  // Filter events
+  const filteredEvents = parentVisibleEvents.filter(e => {
+    const matchesSearch =
+      e.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (e.description || '').toLowerCase().includes(searchQuery.toLowerCase());
+
+    const matchesType =
+      selectedType === 'all' ||
+      (e.type || 'event') === selectedType;
+
+    return matchesSearch && matchesType;
+  });
+
+  // Sort events
+  const sortedEvents = [...filteredEvents].sort((a, b) => {
+    const dateA = new Date(a.date).getTime();
+    const dateB = new Date(b.date).getTime();
+    return sortBy === 'newest' ? dateB - dateA : dateA - dateB;
+  });
+
+  const displayedEvents = sortedEvents.slice(0, visibleCount);
+  const hasMore = sortedEvents.length > visibleCount;
+
+  const noticesCount = parentVisibleEvents.filter(e => (e.type || 'event') === 'notice').length;
+  const eventsCount = parentVisibleEvents.filter(e => (e.type || 'event') === 'event').length;
 
   return (
     <div className="flex flex-col gap-5 font-sans text-slate-900">
-      {/* ─── PAGE HEADER (Matches Admin Style) ─── */}
-      <div className="flex items-start justify-between gap-4 flex-wrap bg-white border border-slate-200 rounded-xl px-6 py-5 shadow-card">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900 m-0">School Circulars &amp; Events</h2>
-          <p className="text-sm text-slate-500 mt-1">
-            Official announcements, examination timetables, holiday circulars, and scheduled campus events.
-          </p>
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes scaleUp {
+          from { transform: scale(0.95); opacity: 0; }
+          to { transform: scale(1); opacity: 1; }
+        }
+        .animate-fade-in {
+          animation: fadeIn 0.2s ease-out forwards;
+        }
+        .animate-scale-up {
+          animation: scaleUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+      `}</style>
+
+      <PageHeader
+        title="School Notice Board"
+        subtitle="Stay updated with the latest official announcements, circulars, and events."
+      />
+
+      {/* Controls: Search, Filter, Sort, Refresh */}
+      <div className="flex flex-col md:flex-row gap-3 justify-between items-stretch md:items-center bg-white p-3.5 border border-slate-200 rounded-xl shadow-sm">
+        {/* Search */}
+        <div className="relative flex-1 max-w-md">
+          <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            className="h-9 w-full pl-9 pr-8 border border-slate-200 rounded-lg text-xs bg-slate-50/50 focus:bg-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-100 transition-all"
+            placeholder="Search announcements..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            >
+              <X size={13} />
+            </button>
+          )}
         </div>
-        <div className="flex items-center gap-2">
-          {/* Tab switcher */}
-          <div className="flex bg-slate-100 rounded-lg p-1 gap-1">
-            {tabs.map(({ key, label, count, Icon }) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setBoardTab(key)}
-                className={cn(
-                  'flex items-center justify-center gap-1.5 h-8 px-3 rounded-md text-xs font-bold transition-all cursor-pointer border-0',
-                  boardTab === key
-                    ? 'bg-white text-slate-900 shadow-2xs'
-                    : 'text-slate-500 hover:text-slate-900 bg-transparent'
-                )}
-              >
-                <Icon size={13} />
-                {label}
-                <span
+
+        {/* Filter & Sort & Refresh */}
+        <div className="flex gap-2 items-center flex-wrap sm:flex-nowrap justify-between sm:justify-end">
+          {/* Filter tabs */}
+          <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs">
+            {(['all', 'notice', 'event'] as const).map(type => {
+              const count = type === 'all' ? parentVisibleEvents.length : type === 'notice' ? noticesCount : eventsCount;
+              return (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => {
+                    setSelectedType(type);
+                    setVisibleCount(PAGE_SIZE);
+                  }}
                   className={cn(
-                    'text-[10px] font-bold rounded-full px-1.5 py-0.5 text-center',
-                    boardTab === key ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600'
+                    "h-8 px-3 rounded-md text-xs font-bold capitalize transition-all flex items-center gap-1.5",
+                    selectedType === type
+                      ? "bg-white text-slate-900 shadow-sm"
+                      : "text-slate-500 hover:text-slate-900"
                   )}
                 >
-                  {count}
-                </span>
-              </button>
-            ))}
+                  <span>{type === 'all' ? 'All' : type === 'notice' ? 'Notices' : 'Events'}</span>
+                  <span className={cn(
+                    "text-[10px] px-1.5 py-0.2 rounded-full font-bold",
+                    selectedType === type ? "bg-blue-50 text-blue font-extrabold" : "bg-slate-200 text-slate-600"
+                  )}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
           </div>
+
+          {/* Sort Dropdown */}
+          <div className="relative flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2.5 h-8 text-xs font-bold text-slate-600 hover:bg-slate-100/50 transition-colors">
+            <ArrowUpDown size={12} className="text-slate-400" />
+            <select
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value as 'newest' | 'oldest')}
+              className="bg-transparent outline-none cursor-pointer pr-1 text-xs"
+            >
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
+            </select>
+          </div>
+
+          {/* Refresh button */}
+          <button
+            type="button"
+            title="Refresh announcements"
+            onClick={fetchNotices}
+            disabled={refreshing}
+            className="h-8 w-8 flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-600 transition-colors"
+          >
+            <RefreshCw size={13} className={cn(refreshing && "animate-spin text-blue")} />
+          </button>
         </div>
       </div>
 
-      {/* Notices board */}
-      {boardTab === 'notices' && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {noticesList.length === 0 ? (
-            <div className="col-span-full">
-              <EmptyState
-                icon={<Megaphone size={32} />}
-                title="No notices published yet."
-                subtitle="Notices published by the school will appear here."
-                className="bg-white border border-slate-200 rounded-2xl py-14"
-              />
-            </div>
-          ) : (
-            noticesList.map(n => (
-              <div
-                key={n._id}
-                className="bg-white border border-slate-200 rounded-xl shadow-sm hover:shadow-md transition-all flex flex-col overflow-hidden group"
-              >
-                {/* Left accent bar + header row */}
-                <div className="flex items-start gap-2.5 p-3 pb-2">
-                  <div className="w-7 h-7 rounded-md bg-amber-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <Bell size={14} className="text-amber-600" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-amber-600">Notice</span>
-                      <span className="text-[10px] text-slate-400">·</span>
-                      <span className="text-[10px] text-slate-400">
-                        {new Date(n.date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' })}
+      {/* Notices Grid */}
+      {sortedEvents.length === 0 ? (
+        <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-12">
+          <EmptyState
+            icon={<CalendarDays size={48} className="text-slate-300" />}
+            title="No announcements found"
+            subtitle={parentVisibleEvents.length === 0 ? "There are no active school notices published currently." : "Try adjusting your search query or filters to find what you are looking for."}
+          />
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {displayedEvents.map(e => {
+              const isNotice = (e.type || 'event') === 'notice';
+              const firstMedia = e.media && e.media[0] ? resolveMediaUrl(e.media[0]) : '';
+
+              return (
+                <div
+                  key={e._id}
+                  onClick={() => setSelectedEvent(e)}
+                  className="group bg-white border border-slate-200 hover:border-blue-300 rounded-xl shadow-sm overflow-hidden flex flex-col hover:-translate-y-1 hover:shadow-md transition-all duration-200 cursor-pointer"
+                >
+                  {/* Media Image Banner only when an image is actually attached */}
+                  {firstMedia && (
+                    <div className="relative h-36 bg-slate-100 overflow-hidden">
+                      <div
+                        className="w-full h-full bg-cover bg-center group-hover:scale-105 transition-transform duration-500"
+                        style={{ backgroundImage: `url(${firstMedia})` }}
+                      />
+                      <span className={cn(
+                        "absolute top-2.5 left-2.5 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider shadow-sm",
+                        isNotice
+                          ? "bg-blue-50 text-blue border border-blue-200"
+                          : "bg-violet-50 text-violet-700 border border-violet-200"
+                      )}>
+                        {e.type || 'event'}
                       </span>
                     </div>
-                    <h4 className="text-sm font-bold text-slate-900 leading-snug group-hover:text-indigo-700 transition-colors">{n.title}</h4>
+                  )}
+
+                  {/* Card Content */}
+                  <div className="p-4 flex flex-col flex-1 gap-1.5">
+                    {/* Header Row: Category Badge (when no image) & Date */}
+                    <div className="flex items-center justify-between gap-2">
+                      {!firstMedia && (
+                        <span className={cn(
+                          "px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider",
+                          isNotice
+                            ? "bg-blue-50 text-blue border border-blue-200"
+                            : "bg-violet-50 text-violet-700 border border-violet-200"
+                        )}>
+                          {e.type || 'event'}
+                        </span>
+                      )}
+
+                      <div className="flex items-center gap-1 text-[11px] text-slate-400 font-medium ml-auto">
+                        <Calendar size={11} />
+                        <span>
+                          {new Date(e.date).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric'
+                          })}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Title */}
+                    <h4 className="text-sm font-bold text-slate-900 line-clamp-1 group-hover:text-blue transition-colors mt-0.5">
+                      {e.title}
+                    </h4>
+
+                    {/* Description preview */}
+                    <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed flex-1">
+                      {e.description || 'No additional details.'}
+                    </p>
+
+                    {/* Footer link */}
+                    <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-blue group-hover:underline">
+                      <span>Read Details</span>
+                      <span>→</span>
+                    </div>
                   </div>
                 </div>
-                {n.description && (
-                  <p className="text-xs text-slate-500 leading-relaxed px-3 pb-3 line-clamp-2">{n.description}</p>
-                )}
-              </div>
-            ))
+              );
+            })}
+          </div>
+
+          {/* Pagination / Load More Controls */}
+          {hasMore && (
+            <div className="flex justify-center pt-2 pb-4">
+              <button
+                type="button"
+                onClick={() => setVisibleCount(prev => prev + PAGE_SIZE)}
+                className="h-10 px-6 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 shadow-sm flex items-center gap-2 transition-all hover:border-slate-300"
+              >
+                <span>Show More Announcements</span>
+                <span className="text-[11px] px-2 py-0.5 bg-slate-100 rounded-full text-slate-500 font-semibold">
+                  {sortedEvents.length - visibleCount} remaining
+                </span>
+                <ChevronDown size={14} className="text-slate-400" />
+              </button>
+            </div>
+          )}
+
+          {!hasMore && sortedEvents.length > PAGE_SIZE && (
+            <div className="flex justify-center pt-2">
+              <button
+                type="button"
+                onClick={() => setVisibleCount(PAGE_SIZE)}
+                className="text-xs font-semibold text-slate-400 hover:text-slate-600 hover:underline"
+              >
+                Show Fewer Announcements
+              </button>
+            </div>
           )}
         </div>
       )}
 
-      {/* Events board */}
-      {boardTab === 'events' && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {eventsList.length === 0 ? (
-            <div className="col-span-full">
-              <EmptyState
-                icon={<Calendar size={32} />}
-                title="No events scheduled yet."
-                subtitle="Events published by the school will appear here."
-                className="bg-white border border-slate-200 rounded-2xl py-14"
-              />
-            </div>
-          ) : (
-            eventsList.map(ev => (
-              <div key={ev._id} className="bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md transition-all flex flex-col overflow-hidden">
-                {ev.media && ev.media.map((url, mi) => {
-                  const type = getMediaType(url);
-                  if (type === 'image')
-                    return <div key={mi} className="h-44 bg-cover bg-center bg-slate-100 flex-shrink-0 rounded-t-2xl" style={{ backgroundImage: `url(${url})` }} />;
-                  if (type === 'video')
-                    return <video key={mi} src={url} controls className="w-full h-44 object-cover bg-black flex-shrink-0 rounded-t-2xl" />;
-                  if (type === 'audio')
-                    return (
-                      <div key={mi} className="p-3 bg-slate-50 border-b border-slate-100 flex-shrink-0 rounded-t-2xl">
-                        <audio src={url} controls className="w-full h-8" />
-                      </div>
-                    );
-                  return null;
-                })}
-                <div className="p-4 flex-1 flex flex-col">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-blue-600 block mb-1.5">
-                    {new Date(ev.date).toLocaleDateString('en-IN', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
-                  </span>
-                  <h4 className="text-sm font-bold text-slate-900 mb-1.5">{ev.title}</h4>
-                  {ev.description && (
-                    <p className="text-xs text-slate-500 leading-relaxed line-clamp-3">{ev.description}</p>
-                  )}
+      {/* Notice Detail Modal */}
+      {selectedEvent && (
+        <div
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 transition-all animate-fade-in"
+          onClick={() => setSelectedEvent(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden relative animate-scale-up"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Modal Close Button */}
+            <button
+              onClick={() => setSelectedEvent(null)}
+              className="absolute right-4 top-4 bg-white/80 hover:bg-white text-slate-500 hover:text-slate-800 p-1.5 rounded-full shadow-sm z-10 transition-colors"
+            >
+              <X size={16} />
+            </button>
+
+            {/* Modal Banner only if image exists */}
+            {selectedEvent.media && selectedEvent.media[0] ? (
+              <div className="h-56 bg-slate-100 relative">
+                <div
+                  className="w-full h-full bg-cover bg-center"
+                  style={{ backgroundImage: `url(${resolveMediaUrl(selectedEvent.media[0])})` }}
+                />
+              </div>
+            ) : (
+              <div className="p-6 pb-0 flex items-center gap-2">
+                <div className="w-9 h-9 rounded-full bg-blue-50 text-blue flex items-center justify-center">
+                  <Megaphone size={18} />
                 </div>
               </div>
-            ))
-          )}
+            )}
+
+            {/* Modal Body */}
+            <div className="p-6 flex flex-col gap-3">
+              <div className="flex items-center gap-3">
+                <span className={cn(
+                  "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                  (selectedEvent.type || 'event') === 'notice'
+                    ? "bg-blue-50 text-blue border border-blue-100"
+                    : "bg-violet-50 text-violet-700 border border-violet-100"
+                )}>
+                  {selectedEvent.type || 'event'}
+                </span>
+
+                <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                  <Calendar size={13} />
+                  <span>
+                    {new Date(selectedEvent.date).toLocaleDateString('en-US', {
+                      weekday: 'long',
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric'
+                    })}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-lg font-bold text-slate-900 tracking-tight leading-snug">
+                  {selectedEvent.title}
+                </h3>
+              </div>
+
+              <div className="border-t border-slate-100 pt-3">
+                <p className="text-xs text-slate-600 leading-relaxed max-h-60 overflow-y-auto pr-1 whitespace-pre-wrap">
+                  {selectedEvent.description || 'No additional details provided.'}
+                </p>
+              </div>
+
+              <div className="mt-3 pt-3 border-t border-slate-100 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setSelectedEvent(null)}
+                  className="px-4 h-9 rounded-lg bg-slate-900 text-white hover:bg-slate-800 text-xs font-bold transition-colors shadow-sm"
+                >
+                  Close Notice
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -162,5 +404,3 @@ const ParentNotices: React.FC<ParentNoticesProps> = ({ events }) => {
 };
 
 export default ParentNotices;
-
-

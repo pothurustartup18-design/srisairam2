@@ -1,3 +1,4 @@
+import { clearCache } from '../../middlewares/cache.middleware';
 import { Router, Request, Response } from 'express';
 import { PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { Exam } from '../../models/exam.model';
@@ -240,6 +241,7 @@ router.patch('/:examId/student', requirePermission('marks:entry'), async (req: R
     }
 
     await exam.save();
+    clearCache('/api/dashboard/students*').catch(() => {});
 
     return res.status(200).json({ success: true, message: 'Student marks updated successfully.' });
   } catch (error: any) {
@@ -584,6 +586,95 @@ router.post('/:examId/report-card/:studentId/whatsapp', requirePermission('marks
     });
   } catch (error: any) {
     console.error('[ReportCard WhatsApp] Error:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+
+// Batch dispatch report cards to an entire class via WhatsApp
+router.post('/:examId/report-cards/class/whatsapp', requirePermission('marks:entry'), async (req: Request, res: Response) => {
+  try {
+    const { examId } = req.params;
+    const { studentIds } = req.body || {};
+
+    const exam = await Exam.findById(examId).lean();
+    if (!exam) {
+      return res.status(404).json({ success: false, message: 'Exam record not found.' });
+    }
+
+    const studentMarksList = exam.studentMarks || [];
+    if (studentMarksList.length === 0) {
+      return res.status(400).json({ success: false, message: 'No student marks found for this exam.' });
+    }
+
+    const targetMarks = Array.isArray(studentIds) && studentIds.length > 0
+      ? studentMarksList.filter((sm: any) => studentIds.includes(String(sm.student)))
+      : studentMarksList;
+
+    const allStudentIds = targetMarks.map((sm: any) => sm.student);
+    const students = await Student.find({ _id: { $in: allStudentIds } }).lean();
+    const studentMap = new Map(students.map((s: any) => [String(s._id), s]));
+
+    let sentCount = 0;
+    const skippedNoPdf: string[] = [];
+    const skippedNoWhatsapp: string[] = [];
+    const failedToQueue: string[] = [];
+
+    for (const sm of targetMarks) {
+      const studentIdStr = String(sm.student);
+      const student = studentMap.get(studentIdStr);
+      const studentName = student
+        ? `${student.firstName || ''} ${student.lastName || ''}`.trim() || (student as any).name || 'Student'
+        : 'Student';
+
+      if (!sm.pdfUrl || !String(sm.pdfUrl).includes('.amazonaws.com/')) {
+        skippedNoPdf.push(studentName);
+        continue;
+      }
+
+      const whatsappNo = student ? (student as any).whatsappNo : null;
+      if (!whatsappNo) {
+        skippedNoWhatsapp.push(studentName);
+        continue;
+      }
+
+      try {
+        const s3Key = String(sm.pdfUrl).split('.amazonaws.com/')[1];
+        if (!s3Key) {
+          skippedNoPdf.push(studentName);
+          continue;
+        }
+        const presignedUrl = await getPresignedDownloadUrl(s3Key, PRESIGN_EXPIRY_2_HOURS);
+        const admissionNo = student ? (student as any).admissionNo || studentIdStr : studentIdStr;
+
+        const result = await queueTemplateNotification('report.card', {
+          to: whatsappNo,
+          dedupeKey: `report-card:${examId}:${studentIdStr}:${Date.now()}`,
+          headerDocument: { link: presignedUrl, filename: `report_card_${admissionNo}.pdf` },
+          params: { student_name_en: studentName, student_name_te: studentName }
+        });
+
+        if (result.queued) {
+          sentCount++;
+        } else {
+          failedToQueue.push(`${studentName} (${result.reason || 'Failed'})`);
+        }
+      } catch (err: any) {
+        failedToQueue.push(`${studentName} (${err.message})`);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      total: targetMarks.length,
+      sentCount,
+      skippedNoPdf,
+      skippedNoWhatsapp,
+      failedToQueue,
+      message: `Enqueued WhatsApp report cards for ${sentCount} of ${targetMarks.length} students.`
+    });
+  } catch (error: any) {
+    console.error('[Batch ReportCard WhatsApp] Error:', error);
     return res.status(500).json({ success: false, error: error.message });
   }
 });

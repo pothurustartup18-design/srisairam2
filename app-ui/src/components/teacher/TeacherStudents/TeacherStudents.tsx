@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Eye, FileText, FolderOpen, MessageSquare, BarChart3, Phone, Users,
   ChevronDown, Search, ArrowUpDown, Check, X, AlertTriangle, Sparkles,
@@ -127,9 +127,93 @@ const TeacherStudents: React.FC<TeacherStudentsProps> = ({ students, loading = f
     }).length;
   }, [students, attendanceStats]);
 
+  // Precompute student exam percentages dynamically from examsList
+  const studentExamStats = useMemo(() => {
+    const stats: Record<string, { byExam: Record<string, number>; overall: number }> = {};
+
+    students.forEach(s => {
+      const sid = String(s.id || (s as any)._id || '');
+      const adm = String(s.admissionNo || '').trim().toLowerCase();
+      stats[sid] = { byExam: {}, overall: s.academicPercentage ?? 0 };
+      if (adm) stats[adm] = stats[sid];
+    });
+
+    if (!examsList || examsList.length === 0) return stats;
+
+    const studentExamScores: Record<string, number[]> = {};
+
+    examsList.forEach(exam => {
+      if (!exam.subjects || !exam.studentMarks) return;
+      const totalPossible = exam.subjects.reduce((sum: number, sub: any) => sum + (Number(sub.totalMarks) || 0), 0);
+      if (totalPossible <= 0) return;
+
+      exam.studentMarks.forEach((sm: any) => {
+        const rawSid = sm.student?._id || sm.student;
+        const sid = String(rawSid || '');
+        const adm = String(sm.student?.admissionNo || sm.admissionNo || '').trim().toLowerCase();
+
+        let totalObtained = 0;
+        let hasMarks = false;
+        if (Array.isArray(sm.marks)) {
+          sm.marks.forEach((m: any) => {
+            if (m.marks !== undefined && m.marks !== null && m.marks !== '') {
+              totalObtained += Number(m.marks) || 0;
+              hasMarks = true;
+            }
+          });
+        }
+
+        if (hasMarks) {
+          const pct = Math.round((totalObtained / totalPossible) * 100);
+          const targetObj = stats[sid] || (adm && stats[adm]) || { byExam: {}, overall: 0 };
+          targetObj.byExam[exam.examName] = pct;
+
+          if (sid) {
+            stats[sid] = targetObj;
+            if (!studentExamScores[sid]) studentExamScores[sid] = [];
+            studentExamScores[sid].push(pct);
+          }
+          if (adm) {
+            stats[adm] = targetObj;
+          }
+        }
+      });
+    });
+
+    // Compute overall average across exams
+    Object.keys(studentExamScores).forEach(sid => {
+      const scores = studentExamScores[sid];
+      if (scores.length > 0 && stats[sid]) {
+        const avg = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+        stats[sid].overall = avg;
+      }
+    });
+
+    return stats;
+  }, [students, examsList]);
+
+  const getStudentPercentage = useCallback((s: StudentData) => {
+    const sid = String(s.id || (s as any)._id || '');
+    const adm = String(s.admissionNo || '').trim().toLowerCase();
+    const entry = studentExamStats[sid] || (adm && studentExamStats[adm]);
+
+    if (rankSort !== 'none' && rankSort !== 'overall') {
+      if (entry?.byExam?.[rankSort] !== undefined) {
+        return entry.byExam[rankSort];
+      }
+      if (s.examPercentages && s.examPercentages[rankSort] !== undefined) {
+        return s.examPercentages[rankSort];
+      }
+    }
+    if (rankSort === 'overall' && entry?.overall !== undefined) {
+      return entry.overall;
+    }
+    return entry?.overall ?? s.academicPercentage ?? 0;
+  }, [studentExamStats, rankSort]);
+
   const toppersCount = useMemo(() => {
-    return students.filter(s => (s.academicPercentage || 0) >= 80).length;
-  }, [students]);
+    return students.filter(s => getStudentPercentage(s) >= 75).length;
+  }, [students, getStudentPercentage]);
 
   // Unified Filtered and Sorted Students
   const filteredStudents = useMemo(() => {
@@ -162,21 +246,15 @@ const TeacherStudents: React.FC<TeacherStudentsProps> = ({ students, loading = f
 
     // 3. Performance Filter
     if (performanceFilter === 'toppers') {
-      list = list.filter(s => (s.academicPercentage || 0) >= 80);
+      list = list.filter(s => getStudentPercentage(s) >= 75);
     }
 
     // 4. Rank & Ordering Logic
     if (rankSort !== 'none') {
       list.sort((a, b) => {
-        if (rankSort === 'overall') {
-          const aPct = a.academicPercentage || 0;
-          const bPct = b.academicPercentage || 0;
-          return bPct - aPct;
-        } else {
-          const aPct = (a.examPercentages && a.examPercentages[rankSort]) || 0;
-          const bPct = (b.examPercentages && b.examPercentages[rankSort]) || 0;
-          return bPct - aPct;
-        }
+        const aPct = getStudentPercentage(a);
+        const bPct = getStudentPercentage(b);
+        return bPct - aPct;
       });
     } else if (sortOrder === 'az') {
       list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
@@ -189,7 +267,7 @@ const TeacherStudents: React.FC<TeacherStudentsProps> = ({ students, loading = f
     }
 
     return list;
-  }, [students, searchQuery, attendanceFilter, performanceFilter, rankSort, sortOrder, attendanceStats]);
+  }, [students, searchQuery, attendanceFilter, performanceFilter, rankSort, sortOrder, attendanceStats, getStudentPercentage]);
 
   const hasActiveFilters = searchQuery !== '' || attendanceFilter !== 'all' || rankSort !== 'none' || sortOrder !== 'default' || performanceFilter !== 'all';
 
@@ -589,9 +667,9 @@ const TeacherStudents: React.FC<TeacherStudentsProps> = ({ students, loading = f
                     <div className="student-compact-info">
                       <div className="student-compact-name flex items-center gap-1.5">
                         <span className="truncate">{s.name}</span>
-                        {s.academicPercentage !== undefined && rankSort !== 'none' && (
+                        {rankSort !== 'none' && (
                           <span className="text-[10px] px-1.5 py-0.2 rounded bg-blue-50 text-blue font-bold flex-shrink-0">
-                            {s.academicPercentage}%
+                            {getStudentPercentage(s)}%
                           </span>
                         )}
                       </div>

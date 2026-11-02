@@ -49,9 +49,11 @@ function buildAlertTemplate(opts: {
   }
   return { key: 'announcement.broadcast', params: { custom: desc || opts.title } };
 }
+import { clearCache } from '../../middlewares/cache.middleware';
 import { requirePermission } from '../../middlewares/permission.middleware';
 import { audit } from '../../middlewares/audit.middleware';
 import { getPresignedDownloadUrl, getPresignedUploadUrl, getMediaType } from '../../services/s3.service';
+import { uploadBase64Document } from '../../services/document.service';
 import { IEventAttachment } from '../../models/event.model';
 import { getPublicOrigin } from '../../utils/publicOrigin';
 
@@ -201,7 +203,7 @@ router.post('/', requirePermission('events:manage'), async (req: Request, res: R
 // Get all events
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const events = await Event.find({}).sort({ date: 1 });
+    const events = await Event.find({}).sort({ date: -1, createdAt: -1 });
     return res.status(200).json({ success: true, data: events });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });
@@ -217,8 +219,20 @@ router.get('/', async (req: Request, res: Response) => {
 // nginx's client_max_body_size (60m, i.e. ~45MB of real file once base64's
 // ~33% inflation is accounted for). This endpoint's own body is tiny
 // (a filename) regardless of how large the actual upload is.
-router.post('/media/presign', requirePermission('events:manage'), async (req: Request, res: Response) => {
+router.post('/media/presign', async (req: Request, res: Response) => {
   try {
+    const user = (req as any).user;
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Authentication required.' });
+    }
+    const role = user.role;
+    const userPerms: string[] = user.permissions || [];
+    const isAllowed = role === 'admin' || role === 'superadmin' || role === 'teacher' ||
+      userPerms.includes('events:manage') || userPerms.includes('homework:create');
+    if (!isAllowed) {
+      return res.status(403).json({ success: false, message: 'Permission denied to upload media.' });
+    }
+
     const { fileName } = req.body;
     if (!fileName || typeof fileName !== 'string') {
       return res.status(400).json({ success: false, message: 'fileName is required.' });
@@ -255,6 +269,47 @@ router.post('/media/presign', requirePermission('events:manage'), async (req: Re
     });
   } catch (error: any) {
     console.error('[Event Media Presign Error]:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Direct server-side upload fallback: if browser direct S3 PUT encounters CORS or network issues
+router.post('/media/upload-direct', async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Authentication required.' });
+    }
+    const role = user.role;
+    const userPerms: string[] = user.permissions || [];
+    const isAllowed = role === 'admin' || role === 'superadmin' || role === 'teacher' ||
+      userPerms.includes('events:manage') || userPerms.includes('homework:create');
+    if (!isAllowed) {
+      return res.status(403).json({ success: false, message: 'Permission denied to upload media.' });
+    }
+
+    const { fileName, fileData } = req.body;
+    if (!fileName || !fileData) {
+      return res.status(400).json({ success: false, message: 'fileName and fileData are required.' });
+    }
+
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const name = String(fileName).replace(/\s+/g, '-');
+    const year = new Date().getFullYear();
+    const s3Key = `events/${year}/${uniqueSuffix}-${name}`;
+
+    const { contentType } = await uploadBase64Document(fileData, s3Key);
+    const previewUrl = await getPresignedDownloadUrl(s3Key);
+
+    return res.status(200).json({
+      success: true,
+      previewUrl,
+      s3Key,
+      contentType,
+      mediaType: getMediaType(s3Key)
+    });
+  } catch (error: any) {
+    console.error('[Event Media Upload Direct Error]:', error);
     return res.status(500).json({ success: false, error: error.message });
   }
 });

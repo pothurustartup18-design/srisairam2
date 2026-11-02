@@ -96,10 +96,10 @@ const ParentFeedback: React.FC<ParentFeedbackProps> = ({ ward, feedbackList, loa
             <div className="ph-hero-identity">
               <div className="ph-date-pill">
                 <MessagesSquare size={12} className="shrink-0" />
-                <span>Helpdesk & Queries</span>
+                <span>School Helpdesk</span>
               </div>
               <h2 className="ph-student-name">
-                {feedbackList.length > 0 ? `${feedbackList.length} Active Thread${feedbackList.length !== 1 ? 's' : ''}` : 'Support Desk'}
+                {feedbackList.length > 0 ? `${feedbackList.length} Inquir${feedbackList.length !== 1 ? 'ies' : 'y'}` : 'School Helpdesk'}
               </h2>
               <div className="ph-role-subtitle">
                 <span className="ph-role-tag">{ward ? ward.name : 'Parent Portal'}</span>
@@ -113,14 +113,14 @@ const ParentFeedback: React.FC<ParentFeedbackProps> = ({ ward, feedbackList, loa
           <div className="ph-telemetry-strip">
             <div className="ph-telemetry-col">
               <span className="ph-telemetry-num">{feedbackList.length}</span>
-              <span className="ph-telemetry-lbl">Total Queries</span>
+              <span className="ph-telemetry-lbl">Total Questions</span>
             </div>
             <div className="ph-telemetry-divider" />
             <div className="ph-telemetry-col">
               <span className="ph-telemetry-num text-emerald-600">
                 {feedbackList.filter(f => (f.messages?.length || 0) > 1).length}
               </span>
-              <span className="ph-telemetry-lbl">Responses</span>
+              <span className="ph-telemetry-lbl">School Replies</span>
             </div>
             <div className="ph-telemetry-divider" />
             <div className="ph-telemetry-col">
@@ -142,7 +142,7 @@ const ParentFeedback: React.FC<ParentFeedbackProps> = ({ ward, feedbackList, loa
             className={cn('ph-filter-chip justify-center min-w-0', mobileTab === 'threads' && 'active')}
           >
             <MessagesSquare size={13} className="shrink-0" />
-            <span className="truncate">My Threads</span>
+            <span className="truncate">My Questions</span>
             <span className={cn(
               'text-[10px] font-extrabold px-1.5 py-0.5 rounded-full ml-0.5',
               mobileTab === 'threads' ? 'bg-white text-blue-600' : 'bg-slate-200 text-slate-600'
@@ -158,7 +158,7 @@ const ParentFeedback: React.FC<ParentFeedbackProps> = ({ ward, feedbackList, loa
             className={cn('ph-filter-chip justify-center min-w-0', mobileTab === 'new' && 'active')}
           >
             <Send size={13} className="shrink-0" />
-            <span className="truncate">Submit Concern</span>
+            <span className="truncate">Ask a Question</span>
           </button>
         </div>
 
@@ -168,16 +168,16 @@ const ParentFeedback: React.FC<ParentFeedbackProps> = ({ ward, feedbackList, loa
             <div className="ph-card-header">
               <div className="ph-card-title">
                 <MessageSquare size={16} className="text-blue-600" />
-                <span>Submit Query to School</span>
+                <span>Ask School Office / Teachers</span>
               </div>
             </div>
             <Form onSubmit={handleSubmitFeedback} className="p-4 flex flex-col gap-3.5">
               <div className="flex flex-col gap-1.5">
-                <label className={labelCls}>Subject / Category</label>
+                <label className={labelCls}>What is your question about?</label>
                 <input
                   type="text"
                   className={inputCls}
-                  placeholder="e.g. Transport timing, Homework, Fees..."
+                  placeholder="e.g. Bus transport route, Homework, Fee receipt, Leave..."
                   required
                   value={feedbackSubject}
                   onChange={(e) => setFeedbackSubject(e.target.value)}
@@ -187,7 +187,7 @@ const ParentFeedback: React.FC<ParentFeedbackProps> = ({ ward, feedbackList, loa
                 <label className={labelCls}>Your Message</label>
                 <textarea
                   className="min-h-[110px] px-3.5 py-2.5 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 bg-slate-50/50 outline-none focus:border-blue-600 focus:bg-white transition-all font-[inherit] resize-y"
-                  placeholder="Describe your question or grievance clearly..."
+                  placeholder="Write your question or request clearly so school administration can reply..."
                   required
                   value={feedbackMessage}
                   onChange={(e) => setFeedbackMessage(e.target.value)}
@@ -205,7 +205,7 @@ const ParentFeedback: React.FC<ParentFeedbackProps> = ({ ward, feedbackList, loa
                   </>
                 ) : (
                   <>
-                    <Send size={14} /> Send To School Administration
+                    <Send size={14} /> Send Question to School
                   </>
                 )}
               </button>
@@ -216,6 +216,16 @@ const ParentFeedback: React.FC<ParentFeedbackProps> = ({ ward, feedbackList, loa
         {/* ── 4. Mobile Content Tab: Threads ── */}
         {mobileTab === 'threads' && (
           <div className="flex flex-col gap-3">
+            {/* Quick explanatory banner for parents */}
+            <div className="p-3 bg-blue-50/80 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900/60 rounded-xl flex items-start gap-2.5 text-xs text-blue-900 dark:text-blue-200 shadow-2xs">
+              <Sparkles size={15} className="text-blue-600 shrink-0 mt-0.5" />
+              <div className="leading-relaxed">
+                <p className="font-bold m-0">Direct Parent Helpdesk</p>
+                <p className="text-[11px] text-blue-800/90 dark:text-blue-300/90 m-0 mt-0.5">
+                  Private communication with the school administration. Ask questions about bus timings, fee receipts, or homework. You will receive official replies directly here.
+                </p>
+              </div>
+            </div>
             {status === 'loading' && feedbackList.length === 0 ? (
               <div className="ph-card overflow-hidden"><SkeletonList rows={3} avatar={false} label="Loading feedback…" /></div>
             ) : status === 'error' && feedbackList.length === 0 ? (
@@ -255,8 +265,18 @@ const ParentFeedback: React.FC<ParentFeedbackProps> = ({ ward, feedbackList, loa
                               })}
                             </span>
                             <span>•</span>
-                            <span className="font-semibold text-blue-600 dark:text-blue-400">
-                              {msgCount} message{msgCount !== 1 ? 's' : ''}
+                            {fb.messages?.some((m) => m.sender !== 'parent') ? (
+                              <span className="font-bold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/50 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60 px-1.5 py-0.5 rounded-md text-[9.5px]">
+                                ✓ School Replied
+                              </span>
+                            ) : (
+                              <span className="font-bold text-amber-700 bg-amber-50 dark:bg-amber-950/50 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60 px-1.5 py-0.5 rounded-md text-[9.5px]">
+                                ⏳ Waiting for School
+                              </span>
+                            )}
+                            <span>•</span>
+                            <span className="font-medium text-slate-500 dark:text-slate-400">
+                              {msgCount} msg{msgCount !== 1 ? 's' : ''}
                             </span>
                           </div>
                         </div>
@@ -371,17 +391,17 @@ const ParentFeedback: React.FC<ParentFeedbackProps> = ({ ward, feedbackList, loa
             <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-slate-100 bg-slate-50/60">
               <MessageSquare size={15} className="text-blue-600" />
               <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                Submit New Concern or Query
+                Ask a Question to School Office
               </span>
             </div>
 
             <Form onSubmit={handleSubmitFeedback} className="p-5 flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">
-                <label className={labelCls}>Subject / Category</label>
+                <label className={labelCls}>What is your question about?</label>
                 <input
                   type="text"
                   className={inputCls}
-                  placeholder="e.g. Transport timing, Homework difficulty, Fee query..."
+                  placeholder="e.g. Bus transport route, Homework, Fee receipt, Leave..."
                   required
                   value={feedbackSubject}
                   onChange={(e) => setFeedbackSubject(e.target.value)}
@@ -391,8 +411,8 @@ const ParentFeedback: React.FC<ParentFeedbackProps> = ({ ward, feedbackList, loa
               <div className="flex flex-col gap-1.5">
                 <label className={labelCls}>Your Message</label>
                 <textarea
-                  className="min-h-[120px] px-3.5 py-2.5 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 bg-slate-50/50 outline-none focus:border-blue-600 focus:bg-white transition-all font-[inherit] resize-y"
-                  placeholder="Please describe your query or concern in detail…"
+                  className="min-h-[110px] px-3.5 py-2.5 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 bg-slate-50/50 outline-none focus:border-blue-600 focus:bg-white transition-all font-[inherit] resize-y"
+                  placeholder="Write your question or request clearly so school administration can reply..."
                   required
                   value={feedbackMessage}
                   onChange={(e) => setFeedbackMessage(e.target.value)}
@@ -424,7 +444,7 @@ const ParentFeedback: React.FC<ParentFeedbackProps> = ({ ward, feedbackList, loa
           <div className="flex flex-col gap-3">
             <div className="flex items-center justify-between pb-1">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                Submitted Communication Threads ({feedbackList.length})
+                My Questions & School Replies ({feedbackList.length})
               </span>
             </div>
 

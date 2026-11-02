@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   User, Mail, Phone, MapPin, Home, Lock, Save, Shield, Key,
-  Send, Eye, EyeOff, Loader2,
+  Send, Eye, EyeOff, Loader2, CheckCircle2, X,
 } from 'lucide-react';
 import { API_BASE } from '../../../constants';
 import { getAccessToken } from '../../../services/api';
@@ -71,6 +71,12 @@ const TeacherProfile: React.FC<TeacherProfileProps> = ({ showToast }) => {
   const [employeeId, setEmployeeId] = useState('');
 
   const [phone, setPhone] = useState('');
+  const [initialPhone, setInitialPhone] = useState('');
+  const [showPhoneOtpModal, setShowPhoneOtpModal] = useState(false);
+  const [phoneOtp, setPhoneOtp] = useState('');
+  const [sendingPhoneOtp, setSendingPhoneOtp] = useState(false);
+  const [phoneOtpSent, setPhoneOtpSent] = useState(false);
+  const [phoneOtpCountdown, setPhoneOtpCountdown] = useState(0);
   const [email, setEmail] = useState('');
   const [cluster, setCluster] = useState('');
   const [address, setAddress] = useState('');
@@ -104,6 +110,7 @@ const TeacherProfile: React.FC<TeacherProfileProps> = ({ showToast }) => {
           setName(data.data.name || '');
           setEmployeeId(data.data.employeeId || '');
           setPhone(data.data.phone || '');
+          setInitialPhone(data.data.phone || '');
           setEmail(data.data.email || '');
           setCluster(data.data.cluster || '');
           setAddress(data.data.address || '');
@@ -116,8 +123,43 @@ const TeacherProfile: React.FC<TeacherProfileProps> = ({ showToast }) => {
     })();
   }, []);
 
-  const handleSaveProfile = async (e: React.FormEvent) => {
-    e.preventDefault();
+  useEffect(() => {
+    if (phoneOtpCountdown <= 0) return;
+    const timer = setInterval(() => setPhoneOtpCountdown(prev => prev - 1), 1000);
+    return () => clearInterval(timer);
+  }, [phoneOtpCountdown]);
+
+  const handleSendPhoneOtp = async (targetPhone?: string) => {
+    const rawPhone = targetPhone || phone;
+    const cleanNum = rawPhone.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
+    if (!/^[6-9]\d{9}$/.test(cleanNum)) {
+      showToast('Please enter a valid 10-digit Indian mobile number first.', 'error');
+      return;
+    }
+    setSendingPhoneOtp(true);
+    try {
+      const res = await fetch(`${API_BASE}/teachers/me/send-phone-otp`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ newPhone: cleanNum }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPhoneOtpSent(true);
+        setPhoneOtpCountdown(60);
+        showToast(`WhatsApp OTP sent to +91 ${cleanNum}`, 'success');
+      } else {
+        showToast(data.message || 'Failed to send WhatsApp verification OTP.', 'error');
+      }
+    } catch {
+      showToast('Error sending WhatsApp OTP.', 'error');
+    } finally {
+      setSendingPhoneOtp(false);
+    }
+  };
+
+  const handleSaveProfile = async (e?: React.FormEvent, verifiedOtp?: string) => {
+    if (e) e.preventDefault();
     const validation = validatePhoneNumber(phone);
     if (!validation.isValid) {
       setPhoneError(validation.error || 'Invalid phone number');
@@ -125,19 +167,40 @@ const TeacherProfile: React.FC<TeacherProfileProps> = ({ showToast }) => {
       return;
     }
 
+    const cleanNewPhone = phone.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
+    const cleanOldPhone = initialPhone.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
+    const isChangingPhone = cleanNewPhone && cleanNewPhone !== cleanOldPhone;
+
+    // If changing mobile number and not yet verified, open the WhatsApp OTP modal
+    if (isChangingPhone && !verifiedOtp) {
+      setShowPhoneOtpModal(true);
+      if (!phoneOtpSent) {
+        handleSendPhoneOtp(cleanNewPhone);
+      }
+      return;
+    }
+
     setSavingProfile(true);
     try {
+      const payload: Record<string, any> = { phone: cleanNewPhone, email, cluster, address };
+      if (isChangingPhone && verifiedOtp) {
+        payload.otpCode = verifiedOtp;
+      }
       const res = await fetch(`${API_BASE}/teachers/me`, {
         method: 'PUT',
         headers: authHeaders(),
-        body: JSON.stringify({ phone, email, cluster, address }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (data.success) {
         showToast('Profile updated successfully.', 'success');
         if (data.data?.phone) {
           setPhone(data.data.phone);
+          setInitialPhone(data.data.phone);
         }
+        setShowPhoneOtpModal(false);
+        setPhoneOtp('');
+        setPhoneOtpSent(false);
       } else {
         showToast(data.message || 'Failed to update profile.', 'error');
       }
@@ -366,6 +429,99 @@ const TeacherProfile: React.FC<TeacherProfileProps> = ({ showToast }) => {
           </form>
         )}
       </SectionCard>
+          {/* WhatsApp OTP Verification Modal for Mobile Number Change */}
+      {showPhoneOtpModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 relative border border-slate-100 animate-scale-up">
+            <button
+              type="button"
+              onClick={() => {
+                setShowPhoneOtpModal(false);
+                setPhoneOtp('');
+              }}
+              className="absolute right-4 top-4 text-slate-400 hover:text-slate-600 p-1.5 rounded-full hover:bg-slate-100 transition-colors"
+            >
+              <X size={18} />
+            </button>
+
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center flex-shrink-0">
+                <Shield size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Verify Mobile Number</h3>
+                <p className="text-xs text-slate-500">WhatsApp OTP verification required</p>
+              </div>
+            </div>
+
+            <div className="bg-emerald-50/70 border border-emerald-200/60 rounded-xl p-3.5 mb-4 text-xs text-emerald-900 leading-relaxed">
+              We sent a 6-digit WhatsApp OTP to <span className="font-bold">+91 {phone.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '')}</span>.
+              Please enter the code to confirm this number can receive school WhatsApp alerts.
+            </div>
+
+            <div className="flex flex-col gap-2 mb-4">
+              <label className={labelCls}>6-Digit WhatsApp OTP</label>
+              <input
+                type="text"
+                maxLength={6}
+                inputMode="numeric"
+                className={cn(inputCls, 'text-center font-mono tracking-[0.3em] text-lg font-bold')}
+                placeholder="······"
+                value={phoneOtp}
+                onChange={e => setPhoneOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                autoFocus
+              />
+            </div>
+
+            <div className="flex items-center justify-between text-xs mb-5">
+              <span className="text-slate-500">Didn't receive code?</span>
+              {phoneOtpCountdown > 0 ? (
+                <span className="text-slate-400 font-semibold">Resend in {phoneOtpCountdown}s</span>
+              ) : (
+                <button
+                  type="button"
+                  disabled={sendingPhoneOtp}
+                  onClick={() => handleSendPhoneOtp()}
+                  className="text-emerald-700 hover:text-emerald-800 font-bold hover:underline"
+                >
+                  {sendingPhoneOtp ? 'Sending…' : 'Resend OTP via WhatsApp'}
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPhoneOtpModal(false);
+                  setPhoneOtp('');
+                }}
+                className="flex-1 h-10 px-4 rounded-lg border border-slate-200 text-slate-600 text-xs font-bold hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={phoneOtp.length !== 6 || savingProfile}
+                onClick={() => handleSaveProfile(undefined, phoneOtp)}
+                className="flex-1 h-10 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
+              >
+                {savingProfile ? (
+                  <>
+                    <Loader2 size={13} className="animate-spin" />
+                    <span>Verifying…</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 size={14} />
+                    <span>Verify & Save</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

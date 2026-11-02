@@ -4,6 +4,7 @@ import { Teacher } from '../models/teacher.model';
 import { Student } from '../models/student.model';
 import { User } from '../models/user.model';
 import { PhoneVerification } from '../models/phoneVerification.model';
+import { ProfileUpdateOTP } from '../models/profileUpdateOTP.model';
 import { getNextEmployeeId } from '../utils/sequence';
 import { isValidPhone } from '../utils/validators';
 import { ServiceError } from '../utils/responseHelpers';
@@ -125,6 +126,7 @@ export async function createTeacher(body: any) {
   try {
     user = new User({
       username: finalUsername,
+      employeeId: finalEmpId,
       email: emailNormalized || undefined,
       password: tempPassword,
       role: 'teacher',
@@ -548,9 +550,41 @@ export async function updateMyTeacherProfile(reqUser: any, body: any) {
   const teacher = await resolveTeacherFromReqUser(reqUser);
   if (!teacher) throw new ServiceError(404, 'Teacher profile not found.');
 
-  const { phone, email, cluster, address } = body;
+  const { phone, email, cluster, address, otpCode } = body;
   const allowedFields: Record<string, any> = {};
-  if (phone !== undefined) allowedFields.phone = phone;
+
+  if (phone !== undefined) {
+    const cleanNewPhone = String(phone).replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
+    const cleanOldPhone = String(teacher.phone || '').replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
+
+    if (cleanNewPhone && cleanNewPhone !== cleanOldPhone) {
+      if (!/^[6-9]\d{9}$/.test(cleanNewPhone)) {
+        throw new ServiceError(400, 'Phone number must be a valid 10-digit Indian mobile number.');
+      }
+      if (!otpCode || typeof otpCode !== 'string' || !otpCode.trim()) {
+        throw new ServiceError(400, 'WhatsApp OTP verification is required to update your mobile number.');
+      }
+
+      const userId = reqUser._id || reqUser.id;
+      const hashedOTP = crypto.createHash('sha256').update(String(otpCode).trim()).digest('hex');
+      const otpRecord = await ProfileUpdateOTP.findOne({
+        userId,
+        phone: cleanNewPhone,
+        expiresAt: { $gt: new Date() },
+      });
+
+      if (!otpRecord || otpRecord.otp !== hashedOTP) {
+        throw new ServiceError(400, 'Invalid or expired WhatsApp OTP code. Please request a new code.');
+      }
+
+      // Valid OTP: consume it
+      await ProfileUpdateOTP.deleteMany({ userId, phone: cleanNewPhone });
+      allowedFields.phone = cleanNewPhone;
+    } else if (cleanNewPhone) {
+      allowedFields.phone = cleanNewPhone;
+    }
+  }
+
   if (email !== undefined) allowedFields.email = email;
   if (cluster !== undefined) allowedFields.cluster = cluster;
   if (address !== undefined) allowedFields.address = address;

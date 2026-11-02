@@ -211,7 +211,9 @@ router.get('/students', cacheResponse(300), async (req: Request, res: Response) 
         address: student.address,
         motherWhatsappNo: student.motherWhatsappNo,
         preferredLanguage: student.preferredLanguage,
-        admissionAcademicYear: student.admissionAcademicYear
+        admissionAcademicYear: student.admissionAcademicYear,
+        installments: student.installments || [],
+        payments: student.payments || []
       };
     });
 

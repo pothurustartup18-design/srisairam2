@@ -121,6 +121,55 @@ router.put('/me', async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/teachers/me/send-phone-otp — sends WhatsApp OTP to verify teacher's new phone
+router.post('/me/send-phone-otp', async (req: Request, res: Response) => {
+  try {
+    const reqUser = req.user as any;
+    if (reqUser?.role !== 'teacher') {
+      return res.status(403).json({ success: false, message: 'Only teachers can request this OTP.' });
+    }
+    const { newPhone } = req.body;
+    if (!newPhone || typeof newPhone !== 'string') {
+      return res.status(400).json({ success: false, message: 'New phone number is required.' });
+    }
+    const cleanPhone = newPhone.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
+    if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
+      return res.status(400).json({ success: false, message: 'Please enter a valid 10-digit Indian mobile number.' });
+    }
+
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const hashedOTP = crypto.createHash('sha256').update(otpCode).digest('hex');
+
+    const userId = reqUser._id || reqUser.id;
+    await ProfileUpdateOTP.deleteMany({ userId, phone: cleanPhone });
+    await ProfileUpdateOTP.create({
+      userId,
+      phone: cleanPhone,
+      otp: hashedOTP,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+    });
+
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`\n[DEV] Mobile Change Verification OTP for Teacher user ${userId} (${cleanPhone}): ${otpCode}\n`);
+    }
+
+    const result = await queueTemplateNotification('auth.otp', {
+      to: cleanPhone,
+      params: { code: otpCode },
+      dedupeKey: `otp:teacher-phone-change:${userId}:${cleanPhone}:${otpCode}`
+    });
+    if (!result.queued) console.error(`[Teacher Phone OTP] Not queued for ${cleanPhone}: ${result.reason}`);
+
+    return res.status(200).json({
+      success: true,
+      message: `WhatsApp OTP ${result.queued ? 'sent' : 'could not be queued'} for +91 ${cleanPhone}`,
+      sent: result.queued,
+    });
+  } catch (error: any) {
+    return handleMessageField(res, error);
+  }
+});
+
 // POST /api/teachers/me/send-password-otp — WhatsApp OTP required before a
 // teacher can change their own password (mirrors school-profile's admin OTP
 // flow, but scoped to the teacher's own registered phone).

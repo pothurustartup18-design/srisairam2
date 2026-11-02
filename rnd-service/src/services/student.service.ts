@@ -46,8 +46,13 @@ export async function createStudent(body: any) {
     finalAdmissionNo = await getNextAdmissionNumber(startYear);
   }
 
-  if (!firstName || !lastName || !className || !section || !classTeacherId || !whatsappNo) {
-    throw new ServiceError(400, 'firstName, lastName, class, section, classTeacherId, and whatsappNo are required.');
+  if (!firstName || !className || !section || !whatsappNo) {
+    const missing = [];
+    if (!firstName || !firstName.trim()) missing.push('First Name');
+    if (!className) missing.push('Class');
+    if (!section) missing.push('Section');
+    if (!whatsappNo) missing.push('Primary WhatsApp');
+    throw new ServiceError(400, `Required fields missing: ${missing.join(', ')}`);
   }
 
   if (!isValidPhone(whatsappNo)) {
@@ -69,9 +74,25 @@ export async function createStudent(body: any) {
   const resolvedFeePaid = feePaid || 0;
   const resolvedFeePending = feePending !== undefined ? feePending : (resolvedTotalFee - resolvedFeePaid);
 
-  const teacher = await Teacher.findById(classTeacherId);
-  if (!teacher) {
-    throw new ServiceError(404, 'Class teacher not found.');
+  let resolvedClassTeacher = null;
+  if (classTeacherId && String(classTeacherId).trim() !== '') {
+    const teacher = await Teacher.findById(classTeacherId);
+    if (!teacher) {
+      throw new ServiceError(404, 'Selected class teacher not found.');
+    }
+    resolvedClassTeacher = teacher._id;
+  } else {
+    const target = `${className}-${section}`;
+    const autoTeacher = await Teacher.findOne({
+      $or: [
+        { classTeacherOf: target },
+        { classTeacherOf: className },
+        { assignedClass: target }
+      ]
+    });
+    if (autoTeacher) {
+      resolvedClassTeacher = autoTeacher._id;
+    }
   }
 
   const existingStudent = await Student.findOne({ admissionNo: finalAdmissionNo });
@@ -82,11 +103,11 @@ export async function createStudent(body: any) {
   const student = new Student({
     admissionNo: finalAdmissionNo,
     admissionAcademicYear: resolvedAdmissionYear,
-    firstName,
-    lastName,
+    firstName: firstName.trim(),
+    lastName: lastName?.trim() || '',
     class: className,
     section,
-    classTeacher: classTeacherId,
+    classTeacher: resolvedClassTeacher,
     rollNumber,
     status: status || 'active',
     feePaid: resolvedFeePaid,
@@ -148,7 +169,7 @@ export async function updateStudent(studentId: string, body: any) {
   if (lastName) student.lastName = lastName;
   if (className) student.class = className;
   if (section) student.section = section;
-  if (classTeacherId) student.classTeacher = classTeacherId;
+  if (classTeacherId !== undefined) student.classTeacher = (classTeacherId && String(classTeacherId).trim() !== '') ? classTeacherId : null;
   if (rollNumber) student.rollNumber = rollNumber;
   if (status) student.status = status;
   if (feePaid !== undefined) student.feePaid = feePaid;

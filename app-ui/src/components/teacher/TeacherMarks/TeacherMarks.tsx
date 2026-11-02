@@ -4,6 +4,7 @@ import {
   FileDown, Download, ArrowLeft, ArrowRight, Save, Edit, Lock, AlertTriangle, Clock,
   ChevronDown, ChevronUp, Eye, Loader2, Plus, MessageCircle, Trash2,
   CheckCircle, ClipboardList, FileText, Users, BookOpen, GripVertical, Info,
+  Search, X, TrendingUp,
 } from 'lucide-react';
 import type { StudentData, ExamData, ExamSubject } from '../../../types';
 import { generateReportCardPDF, generateSingleStudentReportPDF, uploadSingleStudentReportPDF } from './report-card';
@@ -208,9 +209,129 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
   const [examDescription, setExamDescription] = useState('');
   const [dragSubjectIndex, setDragSubjectIndex] = useState<number | null>(null);
 
+  const [mobileSearchQuery, setMobileSearchQuery] = useState('');
+  const [mobileFilterStatus, setMobileFilterStatus] = useState<'all' | 'graded' | 'pending'>('all');
+
   const [generatingStudentId, setGeneratingStudentId] = useState<string | null>(null);
   const [downloadingSingleStudentId, setDownloadingSingleStudentId] = useState<string | null>(null);
   const [sendingWhatsappId, setSendingWhatsappId] = useState<string | null>(null);
+
+  // Batch class report card WhatsApp dispatch state
+  const [showBatchSendModal, setShowBatchSendModal] = useState(false);
+  const [batchSendStep, setBatchSendStep] = useState<'confirm' | 'processing' | 'done'>('confirm');
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, studentName: '', actionText: '' });
+  const [batchLogs, setBatchLogs] = useState<Array<{ id: string; name: string; status: 'pending' | 'generating' | 'sending' | 'sent' | 'skipped_no_whatsapp' | 'error'; message?: string }>>([]);
+  const [batchStats, setBatchStats] = useState({ sent: 0, skippedNoWa: 0, errors: 0 });
+  const batchCancelledRef = useRef(false);
+
+  const handleOpenBatchSendModal = () => {
+    if (!selectedExam) return;
+    if (students.length === 0) {
+      showToast('No students enrolled in this class.', 'error');
+      return;
+    }
+    const marksList = selectedExam.studentMarks || [];
+    if (marksList.length === 0) {
+      showToast('No marks submitted for this exam yet.', 'error');
+      return;
+    }
+    setBatchSendStep('confirm');
+    setBatchProgress({ current: 0, total: students.length, studentName: '', actionText: '' });
+    setBatchLogs(students.map(s => ({
+      id: s.id,
+      name: s.name || `${s.firstName || ''} ${s.lastName || ''}`.trim() || 'Student',
+      status: 'pending',
+    })));
+    setBatchStats({ sent: 0, skippedNoWa: 0, errors: 0 });
+    setShowBatchSendModal(true);
+  };
+
+  const handleStartBatchSend = async () => {
+    if (!selectedExam) return;
+    batchCancelledRef.current = false;
+    setBatchSendStep('processing');
+
+    let sent = 0;
+    let skippedNoWa = 0;
+    let errors = 0;
+
+    for (let i = 0; i < students.length; i++) {
+      if (batchCancelledRef.current) break;
+
+      const student = students[i];
+      const studentName = student.name || `${student.firstName || ''} ${student.lastName || ''}`.trim() || 'Student';
+      const whatsappNo = (student as any).whatsappNo;
+
+      setBatchProgress({
+        current: i + 1,
+        total: students.length,
+        studentName,
+        actionText: 'Checking WhatsApp details...',
+      });
+
+      // 1. Check WhatsApp
+      if (!whatsappNo) {
+        skippedNoWa++;
+        setBatchLogs(prev => prev.map(l => l.id === student.id ? { ...l, status: 'skipped_no_whatsapp', message: 'No WhatsApp number on file' } : l));
+        setBatchStats({ sent, skippedNoWa, errors });
+        continue;
+      }
+
+      try {
+        // 2. Check if PDF exists in selectedExam
+        const smRecord = (selectedExam.studentMarks || []).find((m: any) => String(m.student) === String(student.id));
+        let pdfUrl = smRecord?.pdfUrl;
+
+        if (!pdfUrl) {
+          setBatchProgress({
+            current: i + 1,
+            total: students.length,
+            studentName,
+            actionText: 'Generating & uploading report card PDF...',
+          });
+          setBatchLogs(prev => prev.map(l => l.id === student.id ? { ...l, status: 'generating' } : l));
+          pdfUrl = await uploadSingleStudentReportPDF(selectedExam, student, studentRemarks, teacherName);
+        }
+
+        // 3. Dispatch WhatsApp alert
+        setBatchProgress({
+          current: i + 1,
+          total: students.length,
+          studentName,
+          actionText: 'Dispatching WhatsApp document message...',
+        });
+        setBatchLogs(prev => prev.map(l => l.id === student.id ? { ...l, status: 'sending' } : l));
+
+        const token = getAccessToken();
+        const headers: HeadersInit = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+        const res = await fetch(`${API_BASE}/marks/${selectedExam._id}/report-card/${student.id}/whatsapp`, {
+          method: 'POST',
+          headers,
+        });
+        const resData = await res.json();
+
+        if (res.ok && resData.success) {
+          sent++;
+          setBatchLogs(prev => prev.map(l => l.id === student.id ? { ...l, status: 'sent', message: 'Report card sent to parent' } : l));
+        } else {
+          errors++;
+          setBatchLogs(prev => prev.map(l => l.id === student.id ? { ...l, status: 'error', message: resData.message || 'Failed to queue message' } : l));
+        }
+      } catch (err: any) {
+        errors++;
+        setBatchLogs(prev => prev.map(l => l.id === student.id ? { ...l, status: 'error', message: err.message || 'Error processing report card' } : l));
+      }
+
+      setBatchStats({ sent, skippedNoWa, errors });
+      await new Promise(r => setTimeout(r, 200));
+    }
+
+    setBatchSendStep('done');
+    if (onLoadExamDetails) onLoadExamDetails(selectedExam._id);
+    showToast(`Batch dispatch finished: ${sent} report cards sent.`, sent > 0 ? 'success' : 'error');
+  };
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewStudentName, setPreviewStudentName] = useState<string>('');
   const [downloadingClassPdf, setDownloadingClassPdf] = useState(false);
@@ -493,20 +614,20 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
           MOBILE ONLY: Full-Screen Grades Sheet (covers bottom nav & list)
           ═══════════════════════════════════════════════════════════════════ */}
       {selectedExam && (
-        <div className="md:hidden fixed inset-0 z-[55] flex flex-col" style={{ background: '#eef2f6' }}>
+        <div className="md:hidden fixed inset-0 z-[55] flex flex-col bg-slate-100 dark:bg-slate-950">
           {/* ── Sticky Header ── */}
           <StatusBarSpacer />
-          <div className="flex-shrink-0 bg-white border-b border-slate-200 px-4 flex items-center gap-3 min-h-[56px] shadow-sm">
+          <div className="flex-shrink-0 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 flex items-center gap-3 min-h-[56px] shadow-sm">
             <button
               type="button"
               onClick={onCloseExamDetails}
-              className="w-9 h-9 flex items-center justify-center rounded-full bg-slate-100 text-slate-700 active:bg-slate-200 flex-shrink-0 transition-colors"
+              className="w-9 h-9 flex items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 active:bg-slate-200 dark:active:bg-slate-700 flex-shrink-0 transition-colors"
             >
               <ArrowLeft size={18} />
             </button>
             <div className="flex-1 min-w-0">
-              <div className="font-bold text-slate-900 text-sm truncate">{selectedExam.examName}</div>
-              <div className="text-xs text-slate-500 font-medium">Class {selectedExam.class}</div>
+              <div className="font-bold text-slate-900 dark:text-white text-sm truncate">{selectedExam.examName}</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">Class {selectedExam.class}</div>
             </div>
             <StatusBadge status={selectedExam.status} />
           </div>
@@ -514,30 +635,42 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
           {/* ── Scrollable Content ── */}
           <div className="flex-1 overflow-y-auto -webkit-overflow-scrolling-touch">
             {/* Action Buttons Row */}
-            <div className="px-4 pt-3 pb-2 flex gap-2 flex-wrap">
-              {onEnterMarks && (
+            <div className="px-4 pt-3 pb-2">
+              <div className="grid grid-cols-2 gap-2">
+                {onEnterMarks && (
+                  <Button
+                    size="sm"
+                    disabled={isLocked || selectedExam.status === 'locked'}
+                    title={isLocked ? 'Mark entry is locked' : selectedExam.status === 'locked' ? 'Locked by admin' : ''}
+                    onClick={() => handleEditClick(selectedExam)}
+                    className="w-full justify-center shadow-2xs"
+                  >
+                    <Edit size={13} /> Edit Marks
+                  </Button>
+                )}
+                {selectedExam.status !== 'locked' ? (
+                  <Button size="sm" variant="success" disabled={isLocked} onClick={handleSaveRemarks} className="w-full justify-center shadow-2xs">
+                    Save Remarks
+                  </Button>
+                ) : (
+                  <span className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-slate-100 dark:bg-slate-800 rounded-lg text-slate-500 text-xs font-semibold">
+                    <Lock size={12} /> Locked
+                  </span>
+                )}
+                <Button size="sm" variant="secondary" onClick={handleDownloadPDF} loading={downloadingClassPdf} className="w-full justify-center shadow-2xs">
+                  <FileDown size={13} /> Class PDF
+                </Button>
                 <Button
                   size="sm"
-                  disabled={isLocked || selectedExam.status === 'locked'}
-                  title={isLocked ? 'Mark entry is locked' : selectedExam.status === 'locked' ? 'Locked by admin' : ''}
-                  onClick={() => handleEditClick(selectedExam)}
+                  variant="success"
+                  onClick={handleOpenBatchSendModal}
+                  disabled={!selectedExam.studentMarks?.length}
+                  className="w-full justify-center items-center gap-1.5 font-bold shadow-2xs bg-emerald-600 hover:bg-emerald-700 text-white"
+                  title="Send report cards to all parents via WhatsApp"
                 >
-                  <Edit size={13} /> Edit Marks
+                  <MessageCircle size={13} /> Send Class WA
                 </Button>
-              )}
-              {selectedExam.status !== 'locked' && (
-                <Button size="sm" variant="success" disabled={isLocked} onClick={handleSaveRemarks}>
-                  Save Remarks
-                </Button>
-              )}
-              <Button size="sm" variant="secondary" onClick={handleDownloadPDF} loading={downloadingClassPdf}>
-                <FileDown size={13} /> Class PDF
-              </Button>
-              {selectedExam.status === 'locked' && (
-                <span className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-100 rounded-md text-slate-500 text-xs font-semibold">
-                  <Lock size={12} /> Locked by Admin
-                </span>
-              )}
+              </div>
             </div>
 
             {/* Last edited info */}
@@ -555,17 +688,17 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
             {selectedExam.studentMarks?.length > 0 && analytics && (
               <div className="px-4 pb-3">
                 <div className="flex gap-2 overflow-x-auto pb-1">
-                  <div className="flex-shrink-0 bg-white border border-slate-200 rounded-xl px-4 py-3 min-w-[110px] shadow-sm">
-                    <div className="text-xl font-extrabold text-slate-900">{analytics.avg}%</div>
-                    <div className="text-xs text-slate-500 mt-0.5 font-medium">Class Avg</div>
+                  <div className="flex-shrink-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 min-w-[110px] shadow-sm">
+                    <div className="text-xl font-extrabold text-slate-900 dark:text-white">{analytics.avg}%</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium">Class Avg</div>
                   </div>
-                  <div className="flex-shrink-0 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 min-w-[160px] shadow-sm">
-                    <div className="text-sm font-extrabold text-blue-700 leading-snug">{analytics.top}</div>
-                    <div className="text-xs text-blue-500 mt-0.5 font-medium">Top Scorer</div>
+                  <div className="flex-shrink-0 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 rounded-xl px-4 py-3 min-w-[160px] shadow-sm">
+                    <div className="text-sm font-extrabold text-blue-700 dark:text-blue-300 leading-snug">{analytics.top}</div>
+                    <div className="text-xs text-blue-500 dark:text-blue-400 mt-0.5 font-medium">Top Scorer</div>
                   </div>
-                  <div className="flex-shrink-0 bg-green-50 border border-green-200 rounded-xl px-4 py-3 min-w-[110px] shadow-sm">
-                    <div className="text-xl font-extrabold text-green-800">{analytics.passRate}%</div>
-                    <div className="text-xs text-green-600 mt-0.5 font-medium">Pass Rate</div>
+                  <div className="flex-shrink-0 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 rounded-xl px-4 py-3 min-w-[110px] shadow-sm">
+                    <div className="text-xl font-extrabold text-emerald-800 dark:text-emerald-300">{analytics.passRate}%</div>
+                    <div className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5 font-medium">Pass Rate</div>
                   </div>
                 </div>
               </div>
@@ -583,16 +716,16 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
                     sm => (typeof sm.student === 'string' ? sm.student : (sm.student as any)?._id) === student.id
                   );
                   return (
-                    <div key={student.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                    <div key={student.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-sm">
                       {/* Student header row */}
-                      <div className="px-4 py-3 flex items-center justify-between border-b border-slate-100">
+                      <div className="px-4 py-3 flex items-center justify-between border-b border-slate-100 dark:border-slate-800">
                         <div>
-                          <div className="font-bold text-slate-900 text-sm">{student.name}</div>
+                          <div className="font-bold text-slate-900 dark:text-white text-sm">{student.name}</div>
                           <div className="text-xs text-slate-400 font-medium mt-0.5">Adm: {student.admissionNo}</div>
                         </div>
                       </div>
                       {/* Subject marks inline */}
-                      <div className="px-4 py-3 flex flex-wrap gap-x-5 gap-y-2 border-b border-slate-100">
+                      <div className="px-4 py-3 flex flex-wrap gap-x-5 gap-y-2 border-b border-slate-100 dark:border-slate-800">
                         {selectedExam.subjects.map(sub => {
                           const match = smRecord?.marks.find(m => m.subject === sub.name);
                           const obtained = match !== undefined ? match.obtainedMarks : 'N/A';
@@ -602,7 +735,7 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
                               <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{sub.name}</span>
                               <span className={cn(
                                 'text-sm font-extrabold',
-                                obtained === 'N/A' ? 'text-slate-400' : pct !== null && pct < 40 ? 'text-red-600' : 'text-slate-900'
+                                obtained === 'N/A' ? 'text-slate-400' : pct !== null && pct < 40 ? 'text-red-600' : 'text-slate-900 dark:text-white'
                               )}>
                                 {obtained !== 'N/A' ? `${obtained}/${sub.totalMarks}` : 'N/A'}
                               </span>
@@ -613,7 +746,7 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
                       {/* Remarks + action buttons */}
                       <div className="px-4 py-3 flex flex-col gap-2.5">
                         <textarea
-                          className="w-full min-h-[36px] px-2.5 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue transition-colors font-[inherit] resize-none"
+                          className="w-full min-h-[36px] px-2.5 py-2 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-lg text-xs text-slate-900 dark:text-slate-100 outline-none focus:border-blue transition-colors font-[inherit] resize-none placeholder:text-slate-400 dark:placeholder:text-slate-500"
                           placeholder={selectedExam.status === 'locked' ? 'Locked (Read-Only)' : 'Enter remarks...'}
                           value={studentRemarks[student.id] || ''}
                           onChange={(e) => onStudentRemarkChange(student.id, e.target.value)}
@@ -623,15 +756,15 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
                         <div className="flex gap-1.5 flex-wrap">
                           <Button
                             size="sm"
+                            loading={generatingStudentId === student.id}
+                            loadingText="Generating..."
                             disabled={generatingStudentId === student.id || isLocked}
                             onClick={() => handleGenerateStudentPDF(student)}
                           >
-                            {generatingStudentId === student.id ? <Loader2 size={12} className="animate-spin" /> : null}
-                            {generatingStudentId === student.id ? 'Generating...' : 'Generate'}
+                            Generate
                           </Button>
-                          <Button size="sm" variant="secondary" disabled={downloadingSingleStudentId === student.id} onClick={() => handleDownloadStudentPDF(student)}>
-                            {downloadingSingleStudentId === student.id ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
-                            {' '}Download
+                          <Button size="sm" variant="secondary" loading={downloadingSingleStudentId === student.id} loadingText="Downloading..." disabled={downloadingSingleStudentId === student.id} onClick={() => handleDownloadStudentPDF(student)}>
+                            <Download size={12} /> Download
                           </Button>
                           {smRecord?.pdfUrl && (
                             <Button size="sm" variant="secondary" onClick={() => handlePreviewPDF(smRecord.pdfUrl!, student.name)}>
@@ -1086,6 +1219,14 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
                   <Button variant="secondary" onClick={handleDownloadPDF} loading={downloadingClassPdf}>
                     <FileDown size={14} /> Download Class Reports PDF
                   </Button>
+                  <Button
+                    variant="success"
+                    onClick={handleOpenBatchSendModal}
+                    disabled={!selectedExam.studentMarks?.length}
+                    className="flex items-center gap-1.5 font-bold shadow-2xs"
+                  >
+                    <MessageCircle size={14} /> Send Class Report Cards (WhatsApp)
+                  </Button>
                   {selectedExam.status !== 'locked' && (
                     <Button variant="success" disabled={isLocked} onClick={handleSaveRemarks}>Save Remarks</Button>
                   )}
@@ -1157,9 +1298,8 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
                           </Td>
                           <Td>
                             <div className="flex gap-1.5 justify-center items-center">
-                              <Button size="sm" disabled={generatingStudentId === student.id || isLocked} title={isLocked ? 'Locked' : ''} onClick={() => handleGenerateStudentPDF(student)}>
-                                {generatingStudentId === student.id ? <Loader2 size={13} className="animate-spin mr-1" /> : null}
-                                {generatingStudentId === student.id ? 'Generating...' : 'Generate'}
+                              <Button size="sm" loading={generatingStudentId === student.id} loadingText="Generating..." disabled={generatingStudentId === student.id || isLocked} title={isLocked ? 'Locked' : ''} onClick={() => handleGenerateStudentPDF(student)}>
+                                Generate
                               </Button>
                               <ActionButton type="button" className="w-8 h-8 flex items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors" disabled={downloadingSingleStudentId === student.id} onClick={() => handleDownloadStudentPDF(student)}>
                                 {downloadingSingleStudentId === student.id ? <Loader2 size={14} className="animate-spin text-blue-600" /> : <Download size={14} />}
@@ -1411,51 +1551,121 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
 
       {/* ── Step: Entry ──────────────────────────────────────────────────────── */}
       {/* ── Step: Entry (Mobile Full-Screen Overlay) ── */}
-      {/* ── Step: Entry (Mobile Full-Screen Overlay) ── */}
       {activeStep === 'entry' && !isDesktopView && (() => {
-        const isSingleSubject = subjectFilter !== 'all';
-        const singleSub = isSingleSubject ? examSubjects.find(s => s.name === subjectFilter) : null;
+        const isSingleSubject = subjectFilter !== 'all' || examSubjects.length <= 1;
+        const effectiveSubject = isSingleSubject
+          ? (subjectFilter !== 'all' ? subjectFilter : examSubjects[0]?.name)
+          : null;
+        const singleSub = effectiveSubject ? (examSubjects.find(s => s.name === effectiveSubject) || examSubjects[0]) : null;
+
+        // Aggregate statistics for the current view
+        let gradedCount = 0;
+        let totalMarksSum = 0;
+        let highestMark = 0;
+
+        students.forEach(st => {
+          const grades = studentGrades[st.id] || {};
+          if (isSingleSubject && singleSub) {
+            const val = grades[singleSub.name];
+            if (val !== '' && val !== undefined && !isNaN(Number(val))) {
+              gradedCount++;
+              const num = Number(val);
+              totalMarksSum += num;
+              if (num > highestMark) highestMark = num;
+            }
+          } else {
+            let hasAll = examSubjects.length > 0;
+            examSubjects.forEach(s => {
+              const v = grades[s.name];
+              if (v === '' || v === undefined || isNaN(Number(v))) hasAll = false;
+            });
+            if (hasAll && examSubjects.length > 0) gradedCount++;
+          }
+        });
+
+        const pendingCount = Math.max(0, students.length - gradedCount);
+        const progressPct = students.length > 0 ? Math.round((gradedCount / students.length) * 100) : 0;
+        const classAvg = gradedCount > 0 ? (totalMarksSum / gradedCount).toFixed(1) : '—';
+
+        // Filter students by search and status
+        const filteredStudents = students.filter(student => {
+          if (mobileSearchQuery.trim()) {
+            const q = mobileSearchQuery.trim().toLowerCase();
+            const nameMatch = (student.name || '').toLowerCase().includes(q);
+            const admMatch = (student.admissionNo || '').toLowerCase().includes(q);
+            if (!nameMatch && !admMatch) return false;
+          }
+          const grades = studentGrades[student.id] || {};
+          if (isSingleSubject && singleSub) {
+            const val = grades[singleSub.name];
+            const isGraded = val !== '' && val !== undefined && !isNaN(Number(val));
+            if (mobileFilterStatus === 'graded' && !isGraded) return false;
+            if (mobileFilterStatus === 'pending' && isGraded) return false;
+          } else {
+            let enteredCount = 0;
+            examSubjects.forEach(s => {
+              const v = grades[s.name];
+              if (v !== '' && v !== undefined && !isNaN(Number(v))) enteredCount++;
+            });
+            const isGraded = enteredCount === examSubjects.length && examSubjects.length > 0;
+            if (mobileFilterStatus === 'graded' && !isGraded) return false;
+            if (mobileFilterStatus === 'pending' && isGraded) return false;
+          }
+          return true;
+        });
 
         return (
-          <div className="md:hidden fixed inset-0 z-[55] flex flex-col" style={{ background: '#eef2f6' }}>
-            {/* Sticky Header */}
+          <div className="md:hidden fixed inset-0 z-[55] flex flex-col" style={{ background: '#f8fafc' }}>
             <StatusBarSpacer />
-            <div className="flex-shrink-0 bg-white border-b border-slate-200 px-4 flex items-center gap-3 min-h-[56px] shadow-sm">
-              <button
-                type="button"
-                onClick={() => { onStepChange('list'); onCloseExamDetails(); setSubjectFilter('all'); }}
-                className="w-9 h-9 flex items-center justify-center rounded-full bg-slate-100 text-slate-700 active:bg-slate-200 flex-shrink-0 transition-colors"
-              >
-                <ArrowLeft size={18} />
-              </button>
-              <div className="flex-1 min-w-0">
-                <div className="font-bold text-slate-900 text-sm truncate">{examName}</div>
-                <div className="text-xs text-slate-500 font-medium">
-                  {isSingleSubject && singleSub ? `${singleSub.name} (Max ${singleSub.totalMarks})` : `${examSubjects.length} subjects · Enter marks`}
+
+            {/* ── Sticky Top Header ── */}
+            <div className="flex-shrink-0 bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between gap-3 shadow-xs">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onStepChange('list');
+                    onCloseExamDetails();
+                    setSubjectFilter('all');
+                    setMobileSearchQuery('');
+                    setMobileFilterStatus('all');
+                  }}
+                  className="w-9 h-9 flex items-center justify-center rounded-xl bg-slate-100 text-slate-700 active:bg-slate-200 flex-shrink-0 transition-colors"
+                >
+                  <ArrowLeft size={18} />
+                </button>
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-slate-900 text-base truncate leading-tight">{examName}</div>
+                  <div className="text-xs text-slate-500 font-medium truncate mt-0.5">
+                    {isSingleSubject && singleSub
+                      ? `${singleSub.name} · Max ${singleSub.totalMarks} Marks`
+                      : `${examSubjects.length} subjects · All Students`}
+                  </div>
                 </div>
               </div>
+
               <Button
                 type="submit"
                 form="marks-entry-form-mobile"
                 size="sm"
                 disabled={isLocked || isSubmittingMarks}
                 loading={isSubmittingMarks}
-                title={isLocked ? 'Mark entry is locked for this class' : ''}
+                className="h-9 px-4 rounded-xl font-bold bg-blue text-white shadow-xs hover:bg-blue-600 flex-shrink-0"
               >
                 {isSubmittingMarks ? 'Saving...' : 'Save'}
               </Button>
             </div>
 
-            {/* Horizontal Subject Switcher Strip */}
+            {/* ── Horizontal Subject Switcher (if > 1 subject) ── */}
             {examSubjects.length > 1 && (
-              <div className="flex-shrink-0 bg-white border-b border-slate-200 px-3 py-2 flex items-center gap-1.5 overflow-x-auto -webkit-overflow-scrolling-touch">
+              <div className="flex-shrink-0 bg-white border-b border-slate-200 px-3 py-2 flex items-center gap-1.5 overflow-x-auto -webkit-overflow-scrolling-touch no-scrollbar">
                 <button
                   type="button"
                   onClick={() => setSubjectFilter('all')}
                   className={cn(
-                    'px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-colors flex-shrink-0',
+                    'px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all flex-shrink-0',
                     subjectFilter === 'all'
-                      ? 'bg-blue text-white shadow-sm'
+                      ? 'bg-blue text-white shadow-xs'
                       : 'bg-slate-100 text-slate-600 active:bg-slate-200'
                   )}
                 >
@@ -1469,26 +1679,111 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
                       type="button"
                       onClick={() => setSubjectFilter(sub.name)}
                       className={cn(
-                        'px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-colors flex-shrink-0',
+                        'px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all flex-shrink-0',
                         isActive
-                          ? 'bg-blue text-white shadow-sm'
+                          ? 'bg-blue text-white shadow-xs'
                           : 'bg-slate-100 text-slate-600 active:bg-slate-200'
                       )}
                     >
-                      {sub.name} <span className={cn('text-[10px]', isActive ? 'text-blue-100' : 'text-slate-400')}>({sub.totalMarks})</span>
+                      {sub.name} <span className={cn('text-[10px] ml-0.5', isActive ? 'text-blue-100' : 'text-slate-400')}>({sub.totalMarks}m)</span>
                     </button>
                   );
                 })}
               </div>
             )}
 
-            {/* Scrollable Student Cards */}
-            <div className="flex-1 overflow-y-auto p-3.5 pb-24 -webkit-overflow-scrolling-touch">
-              <Form id="marks-entry-form-mobile" onSubmit={handleLocalSubmit} className="flex flex-col gap-2.5">
-                {students.length === 0 ? (
-                  <div className="bg-white border border-slate-200 rounded-xl p-8 text-center text-slate-400 text-sm">No students found.</div>
+            {/* ── Search & Filter Controls ── */}
+            <div className="flex-shrink-0 bg-white border-b border-slate-200 px-3.5 py-2.5 flex flex-col gap-2 shadow-2xs">
+              <div className="relative flex items-center">
+                <Search size={15} className="absolute left-3 text-slate-400 pointer-events-none" />
+                <input
+                  type="text"
+                  value={mobileSearchQuery}
+                  onChange={(e) => setMobileSearchQuery(e.target.value)}
+                  placeholder="Search student by name or adm no..."
+                  className="w-full h-9 pl-9 pr-8 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-blue outline-none transition-all"
+                />
+                {mobileSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setMobileSearchQuery('')}
+                    className="absolute right-2.5 w-5 h-5 flex items-center justify-center rounded-full bg-slate-200 text-slate-600 text-xs active:bg-slate-300"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                  <button
+                    type="button"
+                    onClick={() => setMobileFilterStatus('all')}
+                    className={cn(
+                      'px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all whitespace-nowrap',
+                      mobileFilterStatus === 'all'
+                        ? 'bg-slate-900 text-white'
+                        : 'bg-slate-100 text-slate-600 active:bg-slate-200'
+                    )}
+                  >
+                    All ({students.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMobileFilterStatus('pending')}
+                    className={cn(
+                      'px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all whitespace-nowrap',
+                      mobileFilterStatus === 'pending'
+                        ? 'bg-amber-600 text-white'
+                        : 'bg-amber-50 text-amber-700 active:bg-amber-100'
+                    )}
+                  >
+                    Pending ({pendingCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMobileFilterStatus('graded')}
+                    className={cn(
+                      'px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all whitespace-nowrap',
+                      mobileFilterStatus === 'graded'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-emerald-50 text-emerald-700 active:bg-emerald-100'
+                    )}
+                  >
+                    Graded ({gradedCount})
+                  </button>
+                </div>
+
+                {isSingleSubject && singleSub && gradedCount > 0 && (
+                  <div className="text-[11px] font-bold text-slate-500 flex items-center gap-1 flex-shrink-0">
+                    <TrendingUp size={13} className="text-emerald-600" />
+                    Avg: <span className="text-slate-800 font-extrabold">{classAvg}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── Scrollable Student Records List ── */}
+            <div className="flex-1 overflow-y-auto p-3.5 pb-28 -webkit-overflow-scrolling-touch">
+              <Form id="marks-entry-form-mobile" onSubmit={handleLocalSubmit} className="flex flex-col gap-2">
+                {filteredStudents.length === 0 ? (
+                  <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-slate-400 text-sm shadow-xs">
+                    <div className="font-semibold text-slate-600">No students found</div>
+                    <div className="text-xs text-slate-400 mt-1">
+                      {mobileSearchQuery ? `No results matching "${mobileSearchQuery}"` : 'No students in this list.'}
+                    </div>
+                    {mobileSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => { setMobileSearchQuery(''); setMobileFilterStatus('all'); }}
+                        className="mt-3 px-3 py-1.5 text-xs font-bold text-blue bg-blue-50 rounded-lg"
+                      >
+                        Clear Filter
+                      </button>
+                    )}
+                  </div>
                 ) : (
-                  students.map((student, idx) => {
+                  filteredStudents.map((student, idx) => {
                     const grades = studentGrades[student.id] || {};
                     let totalObtained = 0;
                     let totalPossible = 0;
@@ -1503,10 +1798,15 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
                     });
                     const pct = totalPossible > 0 ? Math.round((totalObtained / totalPossible) * 100) : 0;
 
-                    // Single Subject View Mode (Quick Entry)
+                    // ── SINGLE SUBJECT VIEW (Fast Linear Data Entry) ──
                     if (isSingleSubject && singleSub) {
-                      const val = (studentGrades[student.id] || {})[singleSub.name];
+                      const val = grades[singleSub.name];
                       const isErr = (validationErrors[student.id] || {})[singleSub.name] || false;
+                      const isEntered = val !== '' && val !== undefined && !isNaN(Number(val));
+                      const numVal = isEntered ? Number(val) : 0;
+                      const maxM = Number(singleSub.totalMarks) || 100;
+                      const subjectPct = maxM > 0 ? Math.round((numVal / maxM) * 100) : 0;
+
                       return (
                         <div
                           key={student.id}
@@ -1514,101 +1814,173 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
                             const el = document.getElementById(`mobile-mark-single-${idx}`);
                             el?.focus();
                           }}
-                          className="bg-white border border-slate-200 rounded-xl p-3 flex items-center justify-between gap-3 shadow-sm active:border-blue/40 transition-colors cursor-pointer"
+                          className={cn(
+                            'bg-white border rounded-2xl p-3 shadow-2xs transition-all flex items-center justify-between gap-3 active:border-blue/40 cursor-pointer',
+                            isErr
+                              ? 'border-red bg-red-50/20'
+                              : isEntered
+                                ? 'border-slate-200'
+                                : 'border-slate-200/90'
+                          )}
                         >
-                          <div className="min-w-0 flex-1">
-                            <div className="font-bold text-slate-900 text-sm truncate">{student.name}</div>
-                            <div className="text-xs text-slate-400 font-medium truncate">
-                              Adm: {student.admissionNo} · {formatClassName(student.class, student.section)}
+                          {/* Student Identification */}
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
+                            <div
+                              className={cn(
+                                'w-8 h-8 rounded-xl flex items-center justify-center font-extrabold text-xs flex-shrink-0 transition-colors',
+                                isEntered
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/80'
+                                  : 'bg-slate-100 text-slate-500'
+                              )}
+                            >
+                              {isEntered ? <Check size={15} strokeWidth={2.5} /> : `#${idx + 1}`}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="font-bold text-slate-900 text-sm leading-tight truncate">
+                                {student.name}
+                              </div>
+                              <div className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5 mt-0.5 truncate">
+                                <span>Adm: {student.admissionNo}</span>
+                                <span className="text-slate-300">•</span>
+                                <span>{formatClassName(student.class, student.section)}</span>
+                              </div>
                             </div>
                           </div>
-                          <div className="flex items-center gap-1.5 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-                            <input
-                              id={`mobile-mark-single-${idx}`}
-                              data-student-idx={idx}
-                              type="number"
-                              inputMode="numeric"
-                              enterKeyHint={idx === students.length - 1 ? 'done' : 'next'}
-                              className={cn(
-                                'w-20 h-10 text-center border rounded-xl text-base font-extrabold outline-none transition-colors font-[inherit]',
-                                isErr
-                                  ? 'border-red bg-red-lt text-red-700'
-                                  : 'border-slate-200 bg-slate-50 focus:bg-white focus:border-blue'
-                              )}
-                              placeholder={`0-${singleSub.totalMarks}`}
-                              value={val !== undefined ? val : ''}
-                              min={0}
-                              max={singleSub.totalMarks}
-                              onChange={(e) => handleGradeChangeLocal(student.id, singleSub.name, e.target.value, singleSub.totalMarks)}
-                              onFocus={(e) => {
-                                setTimeout(() => {
-                                  e.target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                }, 120);
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  e.preventDefault();
-                                  const nextInput = document.querySelector<HTMLInputElement>(`input[data-student-idx="${idx + 1}"]`);
-                                  if (nextInput) {
-                                    nextInput.focus();
-                                    setTimeout(() => {
-                                      nextInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                    }, 100);
-                                  } else {
-                                    e.currentTarget.blur();
+
+                          {/* Marks Entry & Quick Score Indicator */}
+                          <div className="flex items-center gap-2 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                            {/* Score Percentage Pill */}
+                            {isEntered ? (
+                              <span
+                                className={cn(
+                                  'text-[11px] font-black px-2 py-1 rounded-lg border flex-shrink-0 min-w-[42px] text-center',
+                                  subjectPct >= 75
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : subjectPct >= 35
+                                      ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                      : 'bg-rose-50 text-rose-700 border-rose-200'
+                                )}
+                              >
+                                {subjectPct}%
+                              </span>
+                            ) : (
+                              <span className="text-[11px] font-bold px-2 py-1 rounded-lg bg-slate-50 text-slate-400 border border-slate-200 flex-shrink-0 min-w-[42px] text-center">
+                                —
+                              </span>
+                            )}
+
+                            {/* Mark Input */}
+                            <div className="relative flex items-center">
+                              <input
+                                id={`mobile-mark-single-${idx}`}
+                                data-student-idx={idx}
+                                type="number"
+                                inputMode="numeric"
+                                enterKeyHint={idx === filteredStudents.length - 1 ? 'done' : 'next'}
+                                className={cn(
+                                  'w-20 h-11 text-center border-2 rounded-xl text-base font-black outline-none transition-all font-[inherit]',
+                                  isErr
+                                    ? 'border-red bg-red-50 text-red-700'
+                                    : isEntered
+                                      ? 'border-slate-300 bg-white text-slate-900 focus:border-blue focus:ring-2 focus:ring-blue/20'
+                                      : 'border-slate-200 bg-slate-50 text-slate-900 focus:bg-white focus:border-blue focus:ring-2 focus:ring-blue/20'
+                                )}
+                                placeholder={`0-${maxM}`}
+                                value={val !== undefined ? val : ''}
+                                min={0}
+                                max={maxM}
+                                onChange={(e) => handleGradeChangeLocal(student.id, singleSub.name, e.target.value, singleSub.totalMarks)}
+                                onFocus={(e) => {
+                                  setTimeout(() => {
+                                    e.target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                  }, 120);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    const nextInput = document.querySelector<HTMLInputElement>(`input[data-student-idx="${idx + 1}"]`);
+                                    if (nextInput) {
+                                      nextInput.focus();
+                                      setTimeout(() => {
+                                        nextInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                      }, 100);
+                                    } else {
+                                      e.currentTarget.blur();
+                                    }
                                   }
-                                }
+                                }}
+                              />
+                            </div>
+
+                            {/* Quick Absent Button */}
+                            <button
+                              type="button"
+                              title="Mark Absent / 0"
+                              onClick={() => {
+                                const currentVal = (studentGrades[student.id] || {})[singleSub.name];
+                                const newVal = currentVal === 0 ? '' : '0';
+                                handleGradeChangeLocal(student.id, singleSub.name, newVal, singleSub.totalMarks);
                               }}
-                            />
-                            <span className="text-xs font-bold text-slate-400">/{singleSub.totalMarks}</span>
+                              className={cn(
+                                'w-8 h-11 rounded-xl text-[11px] font-black border flex items-center justify-center transition-all',
+                                val === 0
+                                  ? 'bg-rose-50 text-rose-700 border-rose-300'
+                                  : 'bg-slate-50 text-slate-400 border-slate-200 active:bg-slate-100'
+                              )}
+                            >
+                              Ab
+                            </button>
                           </div>
                         </div>
                       );
                     }
 
-                    // All Subjects View Mode (Compact Grid for 2, 4, 6+ subjects)
+                    // ── MULTI-SUBJECT VIEW (When 'All Subjects' is chosen with >1 subjects) ──
                     return (
-                      <div key={student.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                        {/* Student card header with live total */}
+                      <div key={student.id} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
                         <div className="px-3.5 py-2.5 flex items-center justify-between border-b border-slate-100 bg-slate-50/70">
-                          <div className="min-w-0 flex-1">
-                            <div className="font-bold text-slate-900 text-sm truncate">{student.name}</div>
-                            <div className="text-xs text-slate-400 font-medium truncate">
-                              Adm: {student.admissionNo} · {formatClassName(student.class, student.section)}
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <span className="w-6 h-6 rounded-lg bg-slate-200/80 text-slate-700 font-black text-xs flex items-center justify-center flex-shrink-0">
+                              #{idx + 1}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="font-bold text-slate-900 text-sm truncate">{student.name}</div>
+                              <div className="text-[11px] text-slate-400 font-medium truncate">
+                                Adm: {student.admissionNo} · {formatClassName(student.class, student.section)}
+                              </div>
                             </div>
                           </div>
                           {enteredCount > 0 && (
                             <span className={cn(
-                              'text-xs font-extrabold px-2 py-0.5 rounded-md flex-shrink-0 ml-2',
-                              pct >= 40 ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'
+                              'text-xs font-black px-2 py-0.5 rounded-lg flex-shrink-0 ml-2 border',
+                              pct >= 40 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'
                             )}>
                               {totalObtained}/{totalPossible} ({pct}%)
                             </span>
                           )}
                         </div>
 
-                        {/* Subject inputs compact grid */}
                         <div className="p-3 grid grid-cols-2 gap-2.5">
                           {examSubjects.map((sub, subIdx) => {
                             const val = (studentGrades[student.id] || {})[sub.name];
                             const isErr = (validationErrors[student.id] || {})[sub.name] || false;
                             return (
                               <div key={sub.name} className="flex flex-col gap-1">
-                                <div className="flex items-center justify-between">
-                                  <label className="text-[10px] font-bold uppercase tracking-wide text-slate-500 truncate">{sub.name}</label>
-                                  <span className="text-[10px] text-slate-400 font-semibold">/{sub.totalMarks}</span>
+                                <div className="flex items-center justify-between px-0.5">
+                                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 truncate">{sub.name}</label>
+                                  <span className="text-[10px] text-slate-400 font-bold">/{sub.totalMarks}</span>
                                 </div>
                                 <input
                                   id={`mobile-mark-multi-${idx}-${subIdx}`}
                                   data-multi-idx={`${idx}-${subIdx}`}
                                   type="number"
                                   inputMode="numeric"
-                                  enterKeyHint={idx === students.length - 1 && subIdx === examSubjects.length - 1 ? 'done' : 'next'}
+                                  enterKeyHint={idx === filteredStudents.length - 1 && subIdx === examSubjects.length - 1 ? 'done' : 'next'}
                                   className={cn(
-                                    'h-10 px-2 text-center border rounded-lg text-sm font-extrabold outline-none transition-colors font-[inherit] w-full',
+                                    'h-10 px-2 text-center border-2 rounded-xl text-sm font-black outline-none transition-all font-[inherit] w-full',
                                     isErr
-                                      ? 'border-red bg-red-lt text-red-700'
-                                      : 'border-slate-200 bg-slate-50 focus:bg-white focus:border-blue'
+                                      ? 'border-red bg-red-50 text-red-700'
+                                      : 'border-slate-200 bg-slate-50 focus:bg-white focus:border-blue focus:ring-2 focus:ring-blue/20'
                                   )}
                                   placeholder="—"
                                   value={val !== undefined ? val : ''}
@@ -1651,6 +2023,33 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
                   })
                 )}
               </Form>
+            </div>
+
+            {/* ── Sticky Bottom Action Bar with Progress ── */}
+            <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200 px-4 py-3 z-30 flex items-center justify-between gap-3 shadow-lg">
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-bold text-slate-700">
+                  {gradedCount} of {students.length} Graded
+                </div>
+                <div className="w-full max-w-[140px] bg-slate-100 rounded-full h-1.5 mt-1 overflow-hidden">
+                  <div
+                    className="bg-emerald-500 h-1.5 rounded-full transition-all duration-300"
+                    style={{ width: `${progressPct}%` }}
+                  />
+                </div>
+              </div>
+
+              <Button
+                type="submit"
+                form="marks-entry-form-mobile"
+                size="md"
+                disabled={isLocked || isSubmittingMarks}
+                loading={isSubmittingMarks}
+                className="h-11 px-6 rounded-xl font-bold bg-blue text-white shadow-md hover:bg-blue-600 active:scale-[0.98] transition-all flex items-center gap-2 flex-shrink-0"
+              >
+                <Save size={16} />
+                {isSubmittingMarks ? 'Saving...' : 'Save Marks'}
+              </Button>
             </div>
           </div>
         );
@@ -1731,7 +2130,199 @@ const TeacherMarks: React.FC<TeacherMarksProps> = ({
         </Form>
       )}
 
-      {/* ── Edit Confirmation Modal ───────────────────────────────────────────── */}
+      
+      {/* ── Batch Send Report Cards Modal ── */}
+      <Modal
+        isOpen={showBatchSendModal}
+        onClose={() => {
+          if (batchSendStep === 'processing') {
+            batchCancelledRef.current = true;
+          }
+          setShowBatchSendModal(false);
+        }}
+        title="Broadcast Class Report Cards via WhatsApp"
+        maxWidth="540px"
+        footer={
+          batchSendStep === 'confirm' ? (
+            <div className="flex items-center justify-end gap-2 w-full">
+              <Button variant="secondary" onClick={() => setShowBatchSendModal(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="success"
+                onClick={handleStartBatchSend}
+                className="flex items-center gap-2 font-bold"
+              >
+                <MessageCircle size={14} /> Start Sending to Parents
+              </Button>
+            </div>
+          ) : batchSendStep === 'processing' ? (
+            <div className="flex items-center justify-between w-full">
+              <span className="text-xs text-slate-500 font-medium animate-pulse">
+                Sending in progress... Please keep this window open.
+              </span>
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => {
+                  batchCancelledRef.current = true;
+                }}
+              >
+                Stop Sending
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-end w-full">
+              <Button variant="primary" onClick={() => setShowBatchSendModal(false)}>
+                Done
+              </Button>
+            </div>
+          )
+        }
+      >
+        {selectedExam && (
+          <div className="flex flex-col gap-4 py-1 text-slate-800 dark:text-slate-100 font-sans">
+            {batchSendStep === 'confirm' && (
+              <>
+                <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-xl flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <MessageCircle size={18} />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-emerald-950 dark:text-emerald-100 m-0">
+                      Send to All Students in Class {selectedExam.class}
+                    </h4>
+                    <p className="text-xs text-emerald-800/90 dark:text-emerald-300/90 m-0 mt-0.5 leading-relaxed">
+                      This will automatically generate any pending report card PDFs and send each parent their child's individual marksheet directly to their registered WhatsApp number.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2.5">
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 text-center">
+                    <div className="text-lg font-extrabold text-slate-900 dark:text-white">
+                      {students.length}
+                    </div>
+                    <div className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500 mt-0.5">
+                      Total Students
+                    </div>
+                  </div>
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 text-center">
+                    <div className="text-lg font-extrabold text-emerald-600 dark:text-emerald-400">
+                      {students.filter(s => !!(s as any).whatsappNo).length}
+                    </div>
+                    <div className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500 mt-0.5">
+                      Has WhatsApp
+                    </div>
+                  </div>
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 text-center">
+                    <div className="text-lg font-extrabold text-blue-600 dark:text-blue-400">
+                      {students.filter(s => {
+                        const sm = (selectedExam.studentMarks || []).find((m: any) => String(m.student) === String(s.id));
+                        return !!sm?.pdfUrl;
+                      }).length}
+                    </div>
+                    <div className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500 mt-0.5">
+                      PDFs Ready
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-xs text-slate-500 leading-relaxed">
+                  <strong>Exam Term:</strong> {selectedExam.examName} ({selectedExam.subjects.length} subjects)
+                  <br />
+                  <strong>Message:</strong> Official verified <code>report_card_notice</code> document template with PDF attachment.
+                </div>
+              </>
+            )}
+
+            {(batchSendStep === 'processing' || batchSendStep === 'done') && (
+              <>
+                {/* Progress Bar */}
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between text-xs font-bold">
+                    <span className="text-slate-700 dark:text-slate-200">
+                      {batchSendStep === 'done' ? '✓ Process Complete' : batchProgress.actionText}
+                    </span>
+                    <span className="text-blue-600 dark:text-blue-400">
+                      {batchProgress.current} / {batchProgress.total}
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-2 overflow-hidden">
+                    <div
+                      className={cn(
+                        'h-2 rounded-full transition-all duration-300',
+                        batchSendStep === 'done' ? 'bg-emerald-500' : 'bg-blue-600'
+                      )}
+                      style={{
+                        width: `${batchProgress.total > 0 ? (batchProgress.current / batchProgress.total) * 100 : 0}%`,
+                      }}
+                    />
+                  </div>
+                  {batchSendStep === 'processing' && batchProgress.studentName && (
+                    <span className="text-[11px] text-slate-500 font-medium">
+                      Current student: <strong className="text-slate-800 dark:text-slate-200">{batchProgress.studentName}</strong>
+                    </span>
+                  )}
+                </div>
+
+                {/* Real-time stats pill strip */}
+                <div className="flex items-center gap-2 pt-1 text-xs">
+                  <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 font-bold">
+                    ✓ Sent: {batchStats.sent}
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-400 border border-amber-200 dark:border-amber-800 font-bold">
+                    ⚠️ Skipped (No WA): {batchStats.skippedNoWa}
+                  </span>
+                  {batchStats.errors > 0 && (
+                    <span className="px-2.5 py-1 rounded-lg bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400 border border-rose-200 dark:border-rose-800 font-bold">
+                      ❌ Errors: {batchStats.errors}
+                    </span>
+                  )}
+                </div>
+
+                {/* Student Queue / Logs List */}
+                <div className="max-h-[220px] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-1 bg-slate-50/50 dark:bg-slate-900/40">
+                  {batchLogs.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between gap-2 px-3 py-2 text-xs">
+                      <span className="font-semibold text-slate-800 dark:text-slate-200 truncate">
+                        {item.name}
+                      </span>
+                      <div className="shrink-0">
+                        {item.status === 'sent' && (
+                          <span className="inline-flex items-center gap-1 font-bold text-emerald-600 dark:text-emerald-400 text-[11px]">
+                            <CheckCircle size={12} /> Sent
+                          </span>
+                        )}
+                        {(item.status === 'generating' || item.status === 'sending') && (
+                          <span className="inline-flex items-center gap-1 font-bold text-blue-600 dark:text-blue-400 text-[11px]">
+                            <Loader2 size={12} className="animate-spin" /> {item.status === 'generating' ? 'Generating PDF' : 'Sending WA'}
+                          </span>
+                        )}
+                        {item.status === 'skipped_no_whatsapp' && (
+                          <span className="inline-flex items-center gap-1 font-semibold text-amber-700 dark:text-amber-400 text-[11px]">
+                            <AlertTriangle size={12} /> No WhatsApp
+                          </span>
+                        )}
+                        {item.status === 'error' && (
+                          <span className="inline-flex items-center gap-1 font-semibold text-rose-600 dark:text-rose-400 text-[11px]" title={item.message}>
+                            ❌ Failed
+                          </span>
+                        )}
+                        {item.status === 'pending' && (
+                          <span className="text-slate-400 text-[11px]">Pending</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </Modal>
+
+{/* ── Edit Confirmation Modal ───────────────────────────────────────────── */}
       <Modal
         isOpen={showEditConfirm}
         onClose={() => { setShowEditConfirm(false); setPendingEditExam(null); }}
