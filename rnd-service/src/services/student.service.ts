@@ -9,6 +9,7 @@ import { ServiceError } from '../utils/responseHelpers';
 import { getPresignedDownloadUrl } from './s3.service';
 import { buildDocumentKey, uploadBase64Document, deleteDocumentFromS3, presignDocumentList } from './document.service';
 import { clearCache } from '../middlewares/cache.middleware';
+import { ensureParentLogin, syncParentPhone, removeParentLogin } from './parentAccount.service';
 
 const LOG_LABEL = 'Student Documents';
 
@@ -130,6 +131,12 @@ export async function createStudent(body: any) {
   });
 
   await student.save();
+  // Every student gets a parent login (username = admission number; password = primary number or DOB).
+  try {
+    await ensureParentLogin(student);
+  } catch (err: any) {
+    console.error(`[Parent Login] Could not create login for ${student.admissionNo}:`, err.message);
+  }
   await clearCache('/api/dashboard/*');
 
   return Student.findById(student._id).populate('classTeacher', 'name assignedClass');
@@ -175,6 +182,7 @@ export async function updateStudent(studentId: string, body: any) {
   if (feePaid !== undefined) student.feePaid = feePaid;
   if (feePending !== undefined) student.feePending = feePending;
   if (totalFee !== undefined) student.totalFee = totalFee;
+  const phoneChanged = !!whatsappNo && whatsappNo !== student.whatsappNo;
   if (whatsappNo) student.whatsappNo = whatsappNo;
   if (motherWhatsappNo !== undefined) {
     student.motherWhatsappNo = motherWhatsappNo.trim() === '' ? undefined : motherWhatsappNo;
@@ -198,6 +206,7 @@ export async function updateStudent(studentId: string, body: any) {
   if (address !== undefined) student.address = address;
 
   await student.save();
+  if (phoneChanged) await syncParentPhone(student._id, student.whatsappNo);
   await clearCache('/api/dashboard/*');
 
   return Student.findById(student._id).populate('classTeacher', 'name assignedClass');
@@ -221,6 +230,7 @@ export async function deleteStudent(studentId: string, password: string | undefi
   if (!student) {
     throw new ServiceError(404, 'Student not found.');
   }
+  await removeParentLogin(student._id);
   await clearCache('/api/dashboard/*');
 }
 

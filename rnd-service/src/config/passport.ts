@@ -3,7 +3,7 @@ import { Strategy as LocalStrategy } from 'passport-local';
 import { Strategy as JwtStrategy, ExtractJwt } from 'passport-jwt';
 import { User, IUser } from '../models/user.model';
 import { Teacher } from '../models/teacher.model';
-import { Student } from '../models/student.model';
+import { matchesInitialCredential } from '../services/parentAccount.service';
 import redisClient from './redis';
 import { JWT_SECRET } from './secrets';
 
@@ -60,16 +60,9 @@ passport.use(
 
         let isMatch = await user.comparePassword(password);
 
-        // Parents who have never changed their initial password may also sign in
-        // with the student's primary (WhatsApp) number, besides the date of birth.
-        if (!isMatch && user.role === 'parent' && user.studentId && !user.passwordChangedAt) {
-          const last10 = (v?: string) => String(v || '').replace(/\D/g, '').slice(-10);
-          const attempt = last10(password);
-          if (attempt.length === 10) {
-            const student = await Student.findById(user.studentId).select('whatsappNo');
-            if (student && last10(student.whatsappNo) === attempt) isMatch = true;
-          }
-        }
+        // Parents who haven't set their own password yet may also sign in with the
+        // student's primary number or date of birth (see parentAccount.service).
+        if (!isMatch) isMatch = await matchesInitialCredential(user, password);
 
         if (!isMatch) {
           // Increment login attempts (only if DB is connected)

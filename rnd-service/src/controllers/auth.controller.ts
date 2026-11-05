@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { matchesInitialCredential } from '../services/parentAccount.service';
 import passport from 'passport';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
@@ -587,7 +588,7 @@ export const changePassword = async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
 
-    const isMatch = await dbUser.comparePassword(currentPassword);
+    const isMatch = (await dbUser.comparePassword(currentPassword)) || (await matchesInitialCredential(dbUser, currentPassword));
     if (!isMatch) {
       return res.status(400).json({ success: false, message: 'Incorrect current password.' });
     }
