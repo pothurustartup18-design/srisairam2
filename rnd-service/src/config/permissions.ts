@@ -90,6 +90,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
   ],
   teacher: [
     'dashboard:view',
+    'students:create',
     'students:read',
     'teachers:read',
     'attendance:mark',

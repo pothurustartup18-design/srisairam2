@@ -21,3 +21,5 @@ export { SegmentedTabs } from './SegmentedTabs';
 export { Form, FormPendingContext } from './Form';
 export { Skeleton, SkeletonList, SkeletonTableRows, SkeletonStats, SkeletonCard, SkeletonPage } from './Skeleton';
 export { DataState, ErrorState, RefreshNotice } from './DataState';
+
+export { RequiredMark } from './RequiredMark';

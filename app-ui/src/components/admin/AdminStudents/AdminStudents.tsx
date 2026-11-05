@@ -12,7 +12,7 @@ import { getAvatarColors } from '../../../utils/avatar';
 import {
   Button, KpiCard, PageHeader, Badge, DataTable, Th, Td, Tr,
   FilterToolbar, FilterGroup, filterControlClass, ToolbarDivider,
-  EmptyState, LoadingSpinner, Drawer, Modal, MobileCardList, MobileRowCard,
+  EmptyState, LoadingSpinner, Drawer, Modal, MobileCardList, MobileRowCard, RequiredMark,
 } from '../../ui';
 import { Form } from '../../ui/Form';
 import { ActionButton } from '../../ui/ActionButton';
@@ -307,7 +307,7 @@ const AdminStudents: React.FC<AdminStudentsProps> = ({
       {/* WhatsApp Numbers */}
       <div className="grid grid-cols-2 gap-4">
         <div className={fieldCls}>
-          <label className={labelCls}>Father/Primary WhatsApp</label>
+          <label className={labelCls}>Father/Primary WhatsApp<RequiredMark /></label>
           <input type="text" placeholder="e.g. 9876543210" className={inputCls} pattern="[0-9]{10}" maxLength={10} required value={newStudent.whatsappNo || ''} onChange={e => onNewStudentChange({ whatsappNo: e.target.value.replace(/\D/g, '') })} />
         </div>
         <div className={fieldCls}>
@@ -319,19 +319,19 @@ const AdminStudents: React.FC<AdminStudentsProps> = ({
       {/* Names */}
       <div className="grid grid-cols-2 gap-4">
         <div className={fieldCls}>
-          <label className={labelCls}>First Name</label>
+          <label className={labelCls}>First Name<RequiredMark /></label>
           <input type="text" placeholder="First Name" className={inputCls} required value={newStudent.firstName} onChange={e => onNewStudentChange({ firstName: e.target.value })} />
         </div>
         <div className={fieldCls}>
           <label className={labelCls}>Last Name</label>
-          <input type="text" placeholder="Last Name" className={inputCls} required value={newStudent.lastName} onChange={e => onNewStudentChange({ lastName: e.target.value })} />
+          <input type="text" placeholder="Last Name" className={inputCls} value={newStudent.lastName} onChange={e => onNewStudentChange({ lastName: e.target.value })} />
         </div>
       </div>
 
       {/* Class + Section */}
       <div className="grid grid-cols-2 gap-4">
         <div className={fieldCls}>
-          <label className={labelCls}>Class</label>
+          <label className={labelCls}>Class<RequiredMark /></label>
           <select className={selectCls} value={newStudent.class} onChange={e => {
             const sel = e.target.value;
             const availSecs = getSelectableClasses(classesList).filter(c => c.className === sel).map(c => c.section);
@@ -350,7 +350,7 @@ const AdminStudents: React.FC<AdminStudentsProps> = ({
           </select>
         </div>
         <div className={fieldCls}>
-          <label className={labelCls}>Section</label>
+          <label className={labelCls}>Section<RequiredMark /></label>
           <select className={selectCls} value={newStudent.section} onChange={e => {
             const nextSec = e.target.value;
             const autoTeacher = findTeacherForClass(newStudent.class, nextSec, teachers);

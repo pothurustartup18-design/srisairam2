@@ -3,6 +3,7 @@ import { Strategy as LocalStrategy } from 'passport-local';
 import { Strategy as JwtStrategy, ExtractJwt } from 'passport-jwt';
 import { User, IUser } from '../models/user.model';
 import { Teacher } from '../models/teacher.model';
+import { Student } from '../models/student.model';
 import redisClient from './redis';
 import { JWT_SECRET } from './secrets';
 
@@ -57,7 +58,19 @@ passport.use(
           return done(null, false, { message: 'Account is temporarily locked. Try again later.' });
         }
 
-        const isMatch = await user.comparePassword(password);
+        let isMatch = await user.comparePassword(password);
+
+        // Parents who have never changed their initial password may also sign in
+        // with the student's primary (WhatsApp) number, besides the date of birth.
+        if (!isMatch && user.role === 'parent' && user.studentId && !user.passwordChangedAt) {
+          const last10 = (v?: string) => String(v || '').replace(/\D/g, '').slice(-10);
+          const attempt = last10(password);
+          if (attempt.length === 10) {
+            const student = await Student.findById(user.studentId).select('whatsappNo');
+            if (student && last10(student.whatsappNo) === attempt) isMatch = true;
+          }
+        }
+
         if (!isMatch) {
           // Increment login attempts (only if DB is connected)
           user.loginAttempts += 1;

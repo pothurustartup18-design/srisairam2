@@ -15,6 +15,7 @@ import {
   Button, KpiCard, PageHeader, Badge, DataTable, Th, Td, Tr,
   FilterToolbar, FilterGroup, filterControlClass, ToolbarDivider,
   EmptyState, LoadingSpinner, Drawer, Modal, MobileCardList, MobileRowCard,
+  RequiredMark,
 } from '../../ui';
 import { Form } from '../../ui/Form';
 import { ActionButton } from '../../ui/ActionButton';
@@ -281,12 +282,12 @@ const AdminTeachers: React.FC<AdminTeachersProps> = ({
         </div>
       )}
       <div className={fieldCls}>
-        <label className={labelCls}>Teacher Name *</label>
+        <label className={labelCls}>Teacher Name<RequiredMark /></label>
         <input className={inputCls} type="text" placeholder="e.g. Alice Smith" required value={newTeacher.name || ''} onChange={e => onNewTeacherChange('name', e.target.value)} />
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div className={fieldCls}>
-          <label className={labelCls}>Gender *</label>
+          <label className={labelCls}>Gender<RequiredMark /></label>
           <select className={selectCls} required value={newTeacher.gender || 'male'} onChange={e => onNewTeacherChange('gender', e.target.value)}>
             <option value="male">Male</option>
             <option value="female">Female</option>
@@ -294,7 +295,7 @@ const AdminTeachers: React.FC<AdminTeachersProps> = ({
           </select>
         </div>
         <div className={fieldCls}>
-          <label className={labelCls}>Date of Birth *</label>
+          <label className={labelCls}>Date of Birth<RequiredMark /></label>
           <input className={inputCls} type="date" required value={newTeacher.dob || ''} onChange={e => onNewTeacherChange('dob', e.target.value)} />
         </div>
 
@@ -357,7 +358,7 @@ const AdminTeachers: React.FC<AdminTeachersProps> = ({
       {/* Phone with OTP (add mode) or plain (edit mode) */}
       {!isEdit ? (
         <div className={fieldCls}>
-          <label className={labelCls}>Phone Number *</label>
+          <label className={labelCls}>Phone Number<RequiredMark /></label>
           <div className="flex gap-2">
             <input className={cn(inputCls, 'flex-1')} type="tel" placeholder="e.g. 9876543210" required
               disabled={phoneVerified} value={newTeacher.phone || ''}
@@ -397,13 +398,13 @@ const AdminTeachers: React.FC<AdminTeachersProps> = ({
         </div>
       ) : (
         <div className={fieldCls}>
-          <label className={labelCls}>Phone Number</label>
+          <label className={labelCls}>Phone Number<RequiredMark /></label>
           <input className={inputCls} type="tel" placeholder="e.g. 9876543210" required value={newTeacher.phone || ''} onChange={e => onNewTeacherChange('phone', e.target.value)} />
         </div>
       )}
 
       <div className={fieldCls}>
-        <label className={labelCls}>Email *</label>
+        <label className={labelCls}>Email<RequiredMark /></label>
         <input className={inputCls} type="email" placeholder="e.g. alice@school.edu" required value={newTeacher.email || ''} onChange={e => onNewTeacherChange('email', e.target.value)} />
       </div>
 

@@ -12,3 +12,5 @@ export { LoadingSpinner } from './LoadingSpinner';
 export { DataTable, Th, Td, Tr } from './DataTable';
 export { FilterToolbar, FilterGroup, filterControlClass, ToolbarDivider } from './FilterToolbar';
 export { MobileRowCard, MobileCardList } from './MobileRowCard';
+
+export { RequiredMark } from './RequiredMark';

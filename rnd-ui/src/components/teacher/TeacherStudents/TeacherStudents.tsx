@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Eye, FileText, FolderOpen, MessageSquare, BarChart3, Phone, Users,
   ChevronDown, Search, ArrowUpDown, Check, X, AlertTriangle, Sparkles,
-  SlidersHorizontal, RotateCcw
+  SlidersHorizontal, RotateCcw, Plus
 } from 'lucide-react';
 import type { StudentData } from '../../../types';
 import { API_BASE, formatClassName } from '../../../constants';
@@ -14,6 +14,7 @@ import {
   EmptyState, LoadingSpinner, Modal,
 } from '../../ui';
 import { SkeletonList, SkeletonTableRows } from '../../ui/Skeleton';
+import TeacherAddStudent from './TeacherAddStudent';
 
 interface TeacherStudentsProps {
   students: StudentData[];
@@ -22,9 +23,17 @@ interface TeacherStudentsProps {
   attendanceStats: Record<string, number>;
   teacherId?: string;
   onMessageParent: (student: StudentData) => void;
+  /** Show the "Add Student" button (needs the students:create permission). */
+  canAddStudent?: boolean;
+  /** Teacher's selected class-section, e.g. "2-" or "5-A". */
+  defaultClassSection?: string;
+  /** Called after a student is created so the roster can reload. */
+  onStudentAdded?: () => void;
+  showToast?: (message: string, type?: 'success' | 'error') => void;
 }
 
-const TeacherStudents: React.FC<TeacherStudentsProps> = ({ students, loading = false, attendanceStats, teacherId, onMessageParent }) => {
+const TeacherStudents: React.FC<TeacherStudentsProps> = ({ students, loading = false, attendanceStats, teacherId, onMessageParent, canAddStudent = false, defaultClassSection, onStudentAdded, showToast }) => {
+  const [showAddStudent, setShowAddStudent] = useState(false);
   // Results State
   const [examResults, setExamResults] = useState<any[]>([]);
   const [selectedStudentForResults, setSelectedStudentForResults] = useState<any | null>(null);
@@ -287,7 +296,19 @@ const TeacherStudents: React.FC<TeacherStudentsProps> = ({ students, loading = f
       <PageHeader
         title="My Class Student Roster"
         subtitle="Attendance, results, and report cards for your assigned class."
+        actions={canAddStudent ? (
+          <Button onClick={() => setShowAddStudent(true)}><Plus size={15} /> Add Student</Button>
+        ) : undefined}
       />
+      {canAddStudent && (
+        <TeacherAddStudent
+          isOpen={showAddStudent}
+          onClose={() => setShowAddStudent(false)}
+          defaultClassSection={defaultClassSection}
+          onCreated={() => onStudentAdded?.()}
+          showToast={(m, t) => showToast?.(m, t)}
+        />
+      )}
 
       {/* ── Desktop Filter Toolbar (≥768px only) ── */}
       <div className="hidden md:block">

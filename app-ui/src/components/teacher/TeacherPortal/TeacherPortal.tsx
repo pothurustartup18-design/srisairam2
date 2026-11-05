@@ -1013,6 +1013,10 @@ const TeacherPortal: React.FC<TeacherPortalProps> = ({ user, students, teachers,
               attendanceStats={attendanceStats}
               teacherId={activeTeacherId}
               onMessageParent={(student) => setMessageTarget(student)}
+              canAddStudent={hasPermission('students:create')}
+              defaultClassSection={selectedClass}
+              onStudentAdded={() => loadClassStudents(selectedClass)}
+              showToast={showToast}
             />
           )}
 
