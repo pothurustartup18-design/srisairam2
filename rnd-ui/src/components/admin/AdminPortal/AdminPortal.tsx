@@ -698,7 +698,9 @@ const AdminPortal: React.FC<AdminPortalProps> = ({
       lastName,
       class: student.class || '10',
       section: student.section || 'A',
-      classTeacherId: teacher?._id || student.classTeacher || '',
+      // student.classTeacher is a display name ('N/A' when unassigned), never an ID —
+      // only send a real teacher _id, otherwise the backend fails to cast it (500).
+      classTeacherId: teacher?._id || '',
       feePaid: student.feePaid || 0,
       feePending: student.feePending || 0,
       whatsappNo: student.whatsappNo || '',

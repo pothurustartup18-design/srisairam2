@@ -77,6 +77,9 @@ export async function createStudent(body: any) {
 
   let resolvedClassTeacher = null;
   if (classTeacherId && String(classTeacherId).trim() !== '') {
+    if (!/^[a-f\d]{24}$/i.test(String(classTeacherId).trim())) {
+      throw new ServiceError(400, 'Invalid class teacher selected. Please choose a teacher from the list or leave it unassigned.');
+    }
     const teacher = await Teacher.findById(classTeacherId);
     if (!teacher) {
       throw new ServiceError(404, 'Selected class teacher not found.');
@@ -176,7 +179,13 @@ export async function updateStudent(studentId: string, body: any) {
   if (lastName) student.lastName = lastName;
   if (className) student.class = className;
   if (section) student.section = section;
-  if (classTeacherId !== undefined) student.classTeacher = (classTeacherId && String(classTeacherId).trim() !== '') ? classTeacherId : null;
+  if (classTeacherId !== undefined) {
+    const rawTeacherId = classTeacherId ? String(classTeacherId).trim() : '';
+    if (rawTeacherId !== '' && !/^[a-f\d]{24}$/i.test(rawTeacherId)) {
+      throw new ServiceError(400, 'Invalid class teacher selected. Please choose a teacher from the list or leave it unassigned.');
+    }
+    student.classTeacher = rawTeacherId !== '' ? (rawTeacherId as any) : null;
+  }
   if (rollNumber) student.rollNumber = rollNumber;
   if (status) student.status = status;
   if (feePaid !== undefined) student.feePaid = feePaid;
